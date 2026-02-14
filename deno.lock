@@ -5,6 +5,7 @@
     "npm:@tauri-apps/api@2": "2.10.1",
     "npm:@tauri-apps/cli@2": "2.10.0",
     "npm:@tauri-apps/plugin-opener@2": "2.5.3",
+    "npm:@tauri-apps/plugin-sql@^2.3.2": "2.3.2",
     "npm:@types/node@^25.2.3": "25.2.3",
     "npm:@types/react-dom@^19.1.6": "19.2.3_@types+react@19.2.13",
     "npm:@types/react@^19.1.8": "19.2.13",
@@ -1929,6 +1930,12 @@
         "@tauri-apps/api"
       ]
     },
+    "@tauri-apps/plugin-sql@2.3.2": {
+      "integrity": "sha512-4VDXhcKXVpyh5KKpnTGAn6q2DikPHH+TXGh9ZDQzULmG/JEz1RDvzQStgBJKddiukRbYEZ8CGIA2kskx+T+PpA==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
     "@ts-morph/common@0.27.0": {
       "integrity": "sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==",
       "dependencies": [
@@ -3847,6 +3854,7 @@
         "npm:@tauri-apps/api@2",
         "npm:@tauri-apps/cli@2",
         "npm:@tauri-apps/plugin-opener@2",
+        "npm:@tauri-apps/plugin-sql@^2.3.2",
         "npm:@types/node@^25.2.3",
         "npm:@types/react-dom@^19.1.6",
         "npm:@types/react@^19.1.8",
