@@ -65,9 +65,9 @@ export function RegisterForm({
           <form className="p-6 md:p-8" onSubmit={handleSubmit}>
             <FieldGroup>
               <div className="flex flex-col items-center gap-2 text-center">
-                <h1 className="text-2xl font-bold">Create an account</h1>
+                <h1 className="text-2xl font-bold">Create a profile</h1>
                 <p className="text-muted-foreground text-balance">
-                  Sign up for your Acme Inc account
+                  Create your Dashlens profile
                 </p>
               </div>
               
@@ -114,11 +114,11 @@ export function RegisterForm({
               </Field>
               <Field>
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Creating account..." : "Create Account"}
+                  {isLoading ? "Creating profile..." : "Create Profile"}
                 </Button>
               </Field>
               <FieldDescription className="text-center">
-                Already have an account?{" "}
+                Already have an profile?{" "}
                 <a 
                   href="#" 
                   onClick={(e) => {
@@ -133,17 +133,13 @@ export function RegisterForm({
           </form>
           <div className="bg-muted relative hidden md:block">
             <img
-              src="/placeholder.svg"
+              src="/dashlens-logo.svg"
               alt="Image"
               className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
             />
           </div>
         </CardContent>
       </Card>
-      <FieldDescription className="px-6 text-center">
-        By clicking continue, you agree to our <a href="#">Terms of Service</a>{" "}
-        and <a href="#">Privacy Policy</a>.
-      </FieldDescription>
     </div>
   )
 }
