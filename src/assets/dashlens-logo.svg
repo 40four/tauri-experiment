@@ -1,0 +1,32 @@
+<svg id="mainLogo" width="300" height="300" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="grad-outer" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#fa709a;stop-opacity:1"/>
+            <stop offset="50%" style="stop-color:#fe9c63;stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:#ffecd2;stop-opacity:1"/>
+        </linearGradient>
+        <linearGradient id="grad-inner" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#4facfe;stop-opacity:0.95"/>
+            <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:0.95"/>
+        </linearGradient>
+    </defs>
+    
+    <!-- Main lens circle -->
+    <circle cx="100" cy="100" r="85" fill="url(#grad-outer)"/>
+    
+    <!-- Inner transparent circle -->
+    <circle cx="100" cy="100" r="60" fill="url(#grad-inner)"/>
+    
+    <!-- Line chart -->
+    <path d="M 70 110 L 85 95 L 100 105 L 115 85 L 130 95" stroke="white" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.95"/>
+    
+    <!-- Data points -->
+    <circle cx="70" cy="110" r="4.5" fill="white" opacity="0.95"/>
+    <circle cx="85" cy="95" r="4.5" fill="white" opacity="0.95"/>
+    <circle cx="100" cy="105" r="4.5" fill="white" opacity="0.95"/>
+    <circle cx="115" cy="85" r="4.5" fill="white" opacity="0.95"/>
+    <circle cx="130" cy="95" r="4.5" fill="white" opacity="0.95"/>
+    
+    <!-- Lens reflection -->
+    <circle cx="70" cy="70" r="20" fill="white" opacity="0.25"/>
+</svg>

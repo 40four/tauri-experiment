@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { LoginForm } from "./LoginForm";
-import { RegisterForm } from "./RegisterForm";
+import { LoginForm } from "../login-form";
+import { RegisterForm } from "../register-form";
 
 export function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl">
         {mode === "login" ? (
           <LoginForm onToggleMode={() => setMode("register")} />
         ) : (
