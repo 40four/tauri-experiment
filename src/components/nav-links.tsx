@@ -1,12 +1,7 @@
 "use client"
 
-import {
-  MoreHorizontal,
-  PenLine,
-  Database,
-  BarChart2,
-  type LucideIcon,
-} from "lucide-react"
+import { MoreHorizontal, PenLine, Database, BarChart2, type LucideIcon } from "lucide-react"
+import { Link, useLocation } from "react-router-dom"
 
 import {
   DropdownMenu,
@@ -23,9 +18,10 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { ROUTES } from "@/router"
 
 // ---------------------------------------------------------------------------
-// Type definitions
+// Types
 // ---------------------------------------------------------------------------
 
 interface NavLinkAction {
@@ -42,33 +38,24 @@ interface NavLinkItem {
 }
 
 // ---------------------------------------------------------------------------
-// Static nav data — update urls and actions as routes are built out
+// Static nav data — extend actions as features are built out
 // ---------------------------------------------------------------------------
 
 const navLinks: NavLinkItem[] = [
   {
     name: "New Entry",
-    url: "#",
+    url: ROUTES.NEW_ENTRY,
     icon: PenLine,
-    actions: [
-      { label: "Open" },
-    ],
   },
   {
     name: "Data",
-    url: "#",
+    url: ROUTES.DATA,
     icon: Database,
-    actions: [
-      { label: "Open" },
-    ],
   },
   {
     name: "Analytics",
-    url: "#",
+    url: ROUTES.ANALYTICS,
     icon: BarChart2,
-    actions: [
-      { label: "Open" },
-    ],
   },
 ]
 
@@ -78,48 +65,51 @@ const navLinks: NavLinkItem[] = [
 
 export function NavLinks() {
   const { isMobile } = useSidebar()
+  // Hash router paths come back as e.g. "/" from useLocation().pathname
+  const { pathname } = useLocation()
 
   return (
     <SidebarGroup>
       <SidebarGroupLabel>Navigation</SidebarGroupLabel>
       <SidebarMenu>
-        {navLinks.map((item) => (
-          <SidebarMenuItem key={item.name}>
-            {/* Primary link button */}
-            <SidebarMenuButton asChild>
-              <a href={item.url}>
-                <item.icon />
-                <span>{item.name}</span>
-              </a>
-            </SidebarMenuButton>
+        {navLinks.map((item) => {
+          const isActive = pathname === item.url
 
-            {/* 3-dot actions dropdown — only rendered if actions exist */}
-            {item.actions?.length ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <SidebarMenuAction showOnHover>
-                    <MoreHorizontal />
-                    <span className="sr-only">More</span>
-                  </SidebarMenuAction>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  className="w-40"
-                  side={isMobile ? "bottom" : "right"}
-                  align={isMobile ? "end" : "start"}
-                >
-                  {item.actions.map((action) => (
-                    <DropdownMenuItem
-                      key={action.label}
-                      onClick={action.onClick}
-                    >
-                      <span>{action.label}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
-          </SidebarMenuItem>
-        ))}
+          return (
+            <SidebarMenuItem key={item.name}>
+              {/* Primary link — uses router Link for SPA navigation */}
+              <SidebarMenuButton asChild isActive={isActive}>
+                <Link to={item.url}>
+                  <item.icon />
+                  <span>{item.name}</span>
+                </Link>
+              </SidebarMenuButton>
+
+              {/* 3-dot actions dropdown — only rendered if actions exist */}
+              {item.actions?.length ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuAction showOnHover>
+                      <MoreHorizontal />
+                      <span className="sr-only">More</span>
+                    </SidebarMenuAction>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    className="w-40"
+                    side={isMobile ? "bottom" : "right"}
+                    align={isMobile ? "end" : "start"}
+                  >
+                    {item.actions.map((action) => (
+                      <DropdownMenuItem key={action.label} onClick={action.onClick}>
+                        <span>{action.label}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </SidebarMenuItem>
+          )
+        })}
       </SidebarMenu>
     </SidebarGroup>
   )

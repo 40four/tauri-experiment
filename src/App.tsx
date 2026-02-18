@@ -15,19 +15,40 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { HashRouter, Routes, Route, useLocation } from "react-router-dom";
+import { Home } from "@/pages/Home";
+import { NewEntry } from "@/pages/NewEntry";
+import { Data } from "@/pages/Data";
+import { Analytics } from "@/pages/Analytics";
+import { ROUTES } from "@/router";
 import "./App.css";
 
 // ---------------------------------------------------------------------------
-// MainApp
-// Renders after successful authentication. User identity and logout live in
-// the sidebar footer (NavUser) — the header is kept clean for breadcrumbs.
+// Route → breadcrumb label map
+// Extend this as new pages are added.
+// ---------------------------------------------------------------------------
+const BREADCRUMB_LABELS: Record<string, string> = {
+  [ROUTES.HOME]: "Home",
+  [ROUTES.NEW_ENTRY]: "New Entry",
+  [ROUTES.DATA]: "Data",
+  [ROUTES.ANALYTICS]: "Analytics",
+};
+
+// ---------------------------------------------------------------------------
+// AppShell
+// Renders the persistent sidebar + header frame. Page content is swapped via
+// React Router. Must be rendered *inside* HashRouter so useLocation works.
 // ---------------------------------------------------------------------------
 
-function MainApp() {
+function AppShell() {
+  const { pathname } = useLocation();
+  const pageLabel = BREADCRUMB_LABELS[pathname] ?? "Dashboard";
+
   return (
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset>
+        {/* Persistent header with dynamic breadcrumb */}
         <header className="flex h-16 shrink-0 items-center gap-2">
           <div className="flex items-center gap-2 px-4">
             <SidebarTrigger className="-ml-1" />
@@ -42,31 +63,42 @@ function MainApp() {
                 </BreadcrumbItem>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem>
-                  <BreadcrumbPage>Home</BreadcrumbPage>
+                  <BreadcrumbPage>{pageLabel}</BreadcrumbPage>
                 </BreadcrumbItem>
               </BreadcrumbList>
             </Breadcrumb>
           </div>
         </header>
 
-        {/* Main content area — replace with page-level route components later */}
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <div className="grid auto-rows-min gap-4 md:grid-cols-3">
-            <div className="bg-muted/50 aspect-video rounded-xl" />
-            <div className="bg-muted/50 aspect-video rounded-xl" />
-            <div className="bg-muted/50 aspect-video rounded-xl" />
-          </div>
-          <div className="bg-muted/50 min-h-[100vh] flex-1 rounded-xl md:min-h-min" />
-        </div>
+        {/* Page content — routed */}
+        <Routes>
+          <Route path={ROUTES.HOME} element={<Home />} />
+          <Route path={ROUTES.NEW_ENTRY} element={<NewEntry />} />
+          <Route path={ROUTES.DATA} element={<Data />} />
+          <Route path={ROUTES.ANALYTICS} element={<Analytics />} />
+        </Routes>
       </SidebarInset>
     </SidebarProvider>
   );
 }
 
 // ---------------------------------------------------------------------------
+// MainApp
+// Wraps AppShell in HashRouter. HashRouter lives here (not in router.tsx) so
+// the router context wraps both the sidebar and the page content together.
+// ---------------------------------------------------------------------------
+
+function MainApp() {
+  return (
+    <HashRouter>
+      <AppShell />
+    </HashRouter>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App
-// Root — wraps everything in AuthProvider and gates MainApp behind a
-// ProtectedRoute so unauthenticated users are redirected to login.
+// Root — AuthProvider wraps everything; ProtectedRoute gates the main app.
 // ---------------------------------------------------------------------------
 
 function App() {
