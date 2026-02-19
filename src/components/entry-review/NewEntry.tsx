@@ -21,7 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 
 import { recognizeImage, type OcrProgressCallback } from "@/lib/ocr";
-import { EntryReviewSheet } from "@/components/entry-review/EntryReviewSheet";
+import { EntryReviewSheet } from "@/components/entry-review";
 
 // ---------------------------------------------------------------------------
 // Types
