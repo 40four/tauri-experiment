@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import * as React from "react";
-import { ImagePlus, X, ScanText, Clipboard, Check, BookOpen } from "lucide-react";
+import { ImagePlus, X, ScanText, Clipboard, Check, BookOpen, Expand } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 
 import { recognizeImage, type OcrProgressCallback } from "@/lib/ocr";
 import { EntryReviewSheet } from "@/components/entry-review/EntryReviewSheet";
+import { ImageLightbox } from "@/components/image-lightbox/ImageLightbox";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,8 @@ interface ImageEntry {
   progress: number;
   /** True once this entry has been saved to the DB */
   saved: boolean;
+  /** Object URL for the preprocessed PNG — set after OCR runs, revoke on removal */
+  preprocessedUrl: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +62,7 @@ function createImageEntry(file: File): ImageEntry {
     confidence: null,
     progress: 0,
     saved: false,
+    preprocessedUrl: null,
   };
 }
 
@@ -133,10 +137,19 @@ interface ImageCardProps {
   onRunOcr: (id: string) => void;
   onCopyResult: (id: string) => void;
   onReviewEntry: (id: string) => void;
+  onViewImage: (id: string) => void;
   copied: boolean;
 }
 
-function ImageCard({ entry, onRemove, onRunOcr, onCopyResult, onReviewEntry, copied }: ImageCardProps) {
+function ImageCard({
+  entry,
+  onRemove,
+  onRunOcr,
+  onCopyResult,
+  onReviewEntry,
+  onViewImage,
+  copied,
+}: ImageCardProps) {
   return (
     <Card className="relative overflow-hidden">
       {/* Remove button */}
@@ -191,6 +204,17 @@ function ImageCard({ entry, onRemove, onRunOcr, onCopyResult, onReviewEntry, cop
         {entry.status === "loading" && (
           <Progress value={entry.progress} className="h-1" />
         )}
+
+        {/* View button — always visible so the image is always accessible */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full gap-1.5 text-xs"
+          onClick={() => onViewImage(entry.id)}
+        >
+          <Expand className="size-3" />
+          {entry.preprocessedUrl ? "View / Compare" : "View Image"}
+        </Button>
 
         {/* OCR result text */}
         {entry.status === "done" && entry.result && (
@@ -254,6 +278,7 @@ function ImageCard({ entry, onRemove, onRunOcr, onCopyResult, onReviewEntry, cop
 
 export function NewEntry() {
   const [entries, setEntries] = React.useState<ImageEntry[]>([]);
+
   // Track which card's copy button was just clicked (for the "Copied!" flash)
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
 
@@ -261,10 +286,17 @@ export function NewEntry() {
   const [reviewEntryId, setReviewEntryId] = React.useState<string | null>(null);
   const reviewEntry = entries.find((e) => e.id === reviewEntryId) ?? null;
 
-  // Clean up object URLs when entries are removed to avoid memory leaks
+  // Lightbox state — which entry is open for full-size viewing
+  const [lightboxEntryId, setLightboxEntryId] = React.useState<string | null>(null);
+  const lightboxEntry = entries.find((e) => e.id === lightboxEntryId) ?? null;
+
+  // Clean up object URLs when component unmounts to avoid memory leaks
   React.useEffect(() => {
     return () => {
-      entries.forEach((e) => URL.revokeObjectURL(e.previewUrl));
+      entries.forEach((e) => {
+        URL.revokeObjectURL(e.previewUrl);
+        if (e.preprocessedUrl) URL.revokeObjectURL(e.preprocessedUrl);
+      });
     };
   }, []);
 
@@ -278,7 +310,11 @@ export function NewEntry() {
   function handleRemove(id: string) {
     setEntries((prev) => {
       const entry = prev.find((e) => e.id === id);
-      if (entry) URL.revokeObjectURL(entry.previewUrl);
+      if (entry) {
+        URL.revokeObjectURL(entry.previewUrl);
+        // Also revoke the preprocessed blob URL to free canvas memory
+        if (entry.preprocessedUrl) URL.revokeObjectURL(entry.preprocessedUrl);
+      }
       return prev.filter((e) => e.id !== id);
     });
   }
@@ -311,6 +347,7 @@ export function NewEntry() {
                 status: "done",
                 result: result.text.trim(),
                 confidence: result.confidence,
+                preprocessedUrl: result.preprocessedUrl ?? null,
                 progress: 100,
               }
             : e
@@ -324,7 +361,6 @@ export function NewEntry() {
                 ...e,
                 status: "error",
                 errorMessage: err instanceof Error ? err.message : "OCR failed",
-                progress: 0,
               }
             : e
         )
@@ -333,28 +369,29 @@ export function NewEntry() {
   }
 
   async function handleRunAll() {
-    // Run OCR on all idle or errored entries in parallel
-    const targets = entries.filter((e) => e.status === "idle" || e.status === "error");
-    await Promise.all(targets.map((e) => handleRunOcr(e.id)));
+    const runnableIds = entries
+      .filter((e) => e.status === "idle" || e.status === "error")
+      .map((e) => e.id);
+    // Run sequentially to avoid saturating the Tesseract worker
+    for (const id of runnableIds) {
+      await handleRunOcr(id);
+    }
   }
 
-  async function handleCopyResult(id: string) {
+  function handleCopyResult(id: string) {
     const entry = entries.find((e) => e.id === id);
     if (!entry?.result) return;
-    await navigator.clipboard.writeText(entry.result);
+    navigator.clipboard.writeText(entry.result);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    setTimeout(() => setCopiedId(null), 2000);
   }
 
-  /** Opens the review sheet for the given entry id */
   function handleReviewEntry(id: string) {
     setReviewEntryId(id);
   }
 
-  /** Called by the sheet after a successful DB save */
-  function handleEntrySaved(type: "day" | "week", id: number) {
-    console.log(`Saved ${type} entry with id=${id}`);
-    // Mark the card as saved so the button label updates
+  function handleEntrySaved(type: "day" | "week", _id: number) {
+    // Mark the reviewed entry as saved
     if (reviewEntryId) {
       setEntries((prev) =>
         prev.map((e) => (e.id === reviewEntryId ? { ...e, saved: true } : e))
@@ -362,19 +399,17 @@ export function NewEntry() {
     }
   }
 
-  // -- Derived state --
   const hasEntries = entries.length > 0;
-  const hasRunnable = entries.some((e) => e.status === "idle" || e.status === "error");
   const isAnyLoading = entries.some((e) => e.status === "loading");
+  const hasRunnable = entries.some((e) => e.status === "idle" || e.status === "error");
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-6 pt-4">
-      {/* Page header */}
+    <div className="space-y-6 p-6">
       <Card>
         <CardHeader>
           <CardTitle>New Entry</CardTitle>
           <CardDescription>
-            Add screenshots to extract text via OCR, then review and save the parsed data.
+            Upload screenshots of your DoorDash earnings to extract and save them.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -382,7 +417,7 @@ export function NewEntry() {
       {/* Dropzone — always visible so more images can be added */}
       <Dropzone onFiles={handleFiles} />
 
-      {/* Bulk action */}
+      {/* Bulk actions */}
       {hasEntries && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
@@ -404,7 +439,10 @@ export function NewEntry() {
               variant="ghost"
               size="sm"
               onClick={() => {
-                entries.forEach((e) => URL.revokeObjectURL(e.previewUrl));
+                entries.forEach((e) => {
+                  URL.revokeObjectURL(e.previewUrl);
+                  if (e.preprocessedUrl) URL.revokeObjectURL(e.preprocessedUrl);
+                });
                 setEntries([]);
               }}
               disabled={isAnyLoading}
@@ -426,6 +464,7 @@ export function NewEntry() {
               onRunOcr={handleRunOcr}
               onCopyResult={handleCopyResult}
               onReviewEntry={handleReviewEntry}
+              onViewImage={(id) => setLightboxEntryId(id)}
               copied={copiedId === entry.id}
             />
           ))}
@@ -439,6 +478,16 @@ export function NewEntry() {
         rawText={reviewEntry?.result ?? ""}
         ocrConfidence={reviewEntry?.confidence}
         onSaved={handleEntrySaved}
+      />
+
+      {/* Image Lightbox — full-size viewer with optional preprocessed comparison */}
+      <ImageLightbox
+        open={lightboxEntryId !== null}
+        onOpenChange={(open) => { if (!open) setLightboxEntryId(null); }}
+        originalUrl={lightboxEntry?.previewUrl ?? ""}
+        preprocessedUrl={lightboxEntry?.preprocessedUrl ?? undefined}
+        fileName={lightboxEntry?.file.name ?? ""}
+        confidence={lightboxEntry?.confidence}
       />
     </div>
   );
