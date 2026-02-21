@@ -1,6 +1,21 @@
+// ---------------------------------------------------------------------------
+// Data Page
+// Displays all sessions from the SQLite DB with expandable offer rows.
+// Filtering: text search (date / store names), date-range presets + custom.
+// Export: streams filtered sessions + their offers to a CSV download.
+// ---------------------------------------------------------------------------
+
 import * as React from "react";
-import { Calendar as CalendarIcon, Filter, Download, Search } from "lucide-react";
-import { format, subDays, startOfWeek, startOfMonth, startOfYear } from "date-fns";
+import {
+  Calendar as CalendarIcon,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Search,
+  RefreshCw,
+  AlertCircle,
+} from "lucide-react";
+import { format, startOfWeek, startOfMonth, startOfYear, parseISO } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,13 +35,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -35,52 +43,14 @@ import { Calendar } from "@/components/ui/calendar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+import { SessionService, OfferService } from "@/services/entryService";
+import type { Session, Offer } from "@/types/entries";
 
 // ---------------------------------------------------------------------------
-// Types & Mock Data
-// These types mirror the future OCR entry schema. Replace with real DB queries
-// once the entries table is created.
-// ---------------------------------------------------------------------------
-
-interface OcrEntry {
-  id: number;
-  created_at: string;
-  image_name: string;
-  extracted_text: string;
-  confidence: number;
-  status: "processed" | "pending" | "error";
-}
-
-// Placeholder data — replace with actual DB fetch
-const MOCK_ENTRIES: OcrEntry[] = [
-  {
-    id: 1,
-    created_at: new Date().toISOString(),
-    image_name: "receipt_2024_01_15.png",
-    extracted_text: "Total: $127.48\nDate: 01/15/2024\nStore: Whole Foods",
-    confidence: 94.2,
-    status: "processed",
-  },
-  {
-    id: 2,
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    image_name: "invoice_acme.jpg",
-    extracted_text: "Invoice #12345\nAmount: $2,400.00\nDue: 02/01/2024",
-    confidence: 87.5,
-    status: "processed",
-  },
-  {
-    id: 3,
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-    image_name: "screenshot_notes.png",
-    extracted_text: "Meeting notes:\n- Q1 goals\n- Budget review\n- Team hiring",
-    confidence: 91.8,
-    status: "processed",
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Date Range Presets
+// Date Range Utilities
 // ---------------------------------------------------------------------------
 
 type DateRangePreset = "today" | "week" | "month" | "year" | "custom";
@@ -102,7 +72,104 @@ function getPresetDateRange(preset: DateRangePreset): { from: Date; to: Date } |
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// CSV Export Helper
+// Builds a CSV string from sessions + lazily-fetched offers, then triggers
+// a browser download. Called after the user clicks "Export CSV".
+// ---------------------------------------------------------------------------
+
+async function exportToCsv(sessions: Session[]): Promise<void> {
+  const rows: string[] = [
+    // Header row
+    [
+      "Session ID",
+      "Date",
+      "Total Earnings",
+      "Base Pay",
+      "Tips",
+      "Start Time",
+      "End Time",
+      "Active Time (min)",
+      "Total Time (min)",
+      "Offers Count",
+      "Deliveries",
+      "Offer Store",
+      "Offer Earnings",
+    ].join(","),
+  ];
+
+  for (const session of sessions) {
+    const offers = await OfferService.getBySessionId(session.id);
+
+    if (offers.length === 0) {
+      // One row per session even if no offers
+      rows.push(
+        [
+          session.id,
+          session.date,
+          session.total_earnings ?? "",
+          session.base_pay ?? "",
+          session.tips ?? "",
+          session.start_time ?? "",
+          session.end_time ?? "",
+          session.active_time ?? "",
+          session.total_time ?? "",
+          session.offers_count ?? "",
+          session.deliveries ?? "",
+          "",
+          "",
+        ].join(",")
+      );
+    } else {
+      // One row per offer, repeating session fields
+      offers.forEach((offer) => {
+        rows.push(
+          [
+            session.id,
+            session.date,
+            session.total_earnings ?? "",
+            session.base_pay ?? "",
+            session.tips ?? "",
+            session.start_time ?? "",
+            session.end_time ?? "",
+            session.active_time ?? "",
+            session.total_time ?? "",
+            session.offers_count ?? "",
+            session.deliveries ?? "",
+            `"${offer.store ?? ""}"`,
+            offer.total_earnings ?? "",
+          ].join(",")
+        );
+      });
+    }
+  }
+
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `dashlens-export-${format(new Date(), "yyyy-MM-dd")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Formatting Helpers
+// ---------------------------------------------------------------------------
+
+function formatMinutes(minutes: number | null): string {
+  if (minutes === null) return "—";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function formatCurrency(value: number | null): string {
+  if (value === null) return "—";
+  return `$${value.toFixed(2)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: DateRangePicker
 // ---------------------------------------------------------------------------
 
 function DateRangePicker({
@@ -163,9 +230,165 @@ function DateRangePicker({
   );
 }
 
-function ConfidenceBadge({ score }: { score: number }) {
-  const variant = score >= 90 ? "default" : score >= 70 ? "secondary" : "destructive";
-  return <Badge variant={variant}>{score.toFixed(1)}%</Badge>;
+// ---------------------------------------------------------------------------
+// Sub-component: ExpandableSessionRow
+// Renders a single session row. On expand, fetches and renders its offers.
+// ---------------------------------------------------------------------------
+
+function ExpandableSessionRow({ session }: { session: Session }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [offers, setOffers] = React.useState<Offer[]>([]);
+  const [loadingOffers, setLoadingOffers] = React.useState(false);
+
+  async function handleExpand() {
+    const next = !expanded;
+    setExpanded(next);
+
+    // Fetch offers on first expand only
+    if (next && offers.length === 0) {
+      setLoadingOffers(true);
+      try {
+        const result = await OfferService.getBySessionId(session.id);
+        setOffers(result);
+      } catch (err) {
+        console.error("Failed to load offers for session", session.id, err);
+      } finally {
+        setLoadingOffers(false);
+      }
+    }
+  }
+
+  return (
+    <>
+      {/* Session summary row */}
+      <TableRow
+        className="cursor-pointer select-none"
+        onClick={handleExpand}
+      >
+        {/* Expand toggle */}
+        <TableCell className="w-8 px-2">
+          {expanded ? (
+            <ChevronDown className="size-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="size-4 text-muted-foreground" />
+          )}
+        </TableCell>
+
+        {/* Date */}
+        <TableCell className="font-mono text-xs">
+          {format(parseISO(session.date), "MMM d, yyyy")}
+        </TableCell>
+
+        {/* Total Earnings */}
+        <TableCell className="font-medium tabular-nums">
+          {formatCurrency(session.total_earnings)}
+        </TableCell>
+
+        {/* Base Pay + Tips breakdown */}
+        <TableCell className="text-xs text-muted-foreground tabular-nums">
+          {session.base_pay !== null || session.tips !== null ? (
+            <span>
+              {formatCurrency(session.base_pay)} pay /{" "}
+              {formatCurrency(session.tips)} tips
+            </span>
+          ) : (
+            "—"
+          )}
+        </TableCell>
+
+        {/* Time on road */}
+        <TableCell className="tabular-nums text-sm">
+          {formatMinutes(session.active_time)}
+          {session.total_time !== null && (
+            <span className="text-muted-foreground text-xs ml-1">
+              / {formatMinutes(session.total_time)}
+            </span>
+          )}
+        </TableCell>
+
+        {/* Deliveries */}
+        <TableCell className="text-center tabular-nums">
+          {session.deliveries ?? "—"}
+        </TableCell>
+
+        {/* Offers count */}
+        <TableCell className="text-center">
+          {session.offers_count !== null ? (
+            <Badge variant="secondary">{session.offers_count}</Badge>
+          ) : (
+            "—"
+          )}
+        </TableCell>
+      </TableRow>
+
+      {/* Expanded offer rows */}
+      {expanded && (
+        <>
+          {loadingOffers ? (
+            <TableRow>
+              <TableCell colSpan={7} className="py-2 pl-10">
+                <Skeleton className="h-4 w-48" />
+              </TableCell>
+            </TableRow>
+          ) : offers.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={7}
+                className="py-2 pl-10 text-xs text-muted-foreground italic"
+              >
+                No individual offers recorded for this session.
+              </TableCell>
+            </TableRow>
+          ) : (
+            offers.map((offer) => (
+              <TableRow
+                key={offer.id}
+                className="bg-muted/30 hover:bg-muted/40"
+              >
+                {/* Indent spacer */}
+                <TableCell colSpan={2} />
+
+                {/* Store name spans earnings col */}
+                <TableCell
+                  colSpan={2}
+                  className="text-xs text-muted-foreground pl-6"
+                >
+                  📦 {offer.store ?? "Unknown store"}
+                </TableCell>
+
+                {/* Offer earnings */}
+                <TableCell className="tabular-nums text-xs font-medium">
+                  {formatCurrency(offer.total_earnings)}
+                </TableCell>
+
+                {/* Empty cells to fill row */}
+                <TableCell colSpan={2} />
+              </TableRow>
+            ))
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: TableSkeleton
+// Shown while initial session data is loading.
+// ---------------------------------------------------------------------------
+
+function TableSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <TableRow key={i}>
+          <TableCell colSpan={7}>
+            <Skeleton className="h-4 w-full" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +396,13 @@ function ConfidenceBadge({ score }: { score: number }) {
 // ---------------------------------------------------------------------------
 
 export function Data() {
-  const [entries, setEntries] = React.useState<OcrEntry[]>(MOCK_ENTRIES);
+  // -- State --
+
+  const [sessions, setSessions] = React.useState<Session[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [exporting, setExporting] = React.useState(false);
+
   const [searchQuery, setSearchQuery] = React.useState("");
   const [datePreset, setDatePreset] = React.useState<DateRangePreset>("month");
   const [customDateRange, setCustomDateRange] = React.useState<{
@@ -181,42 +410,73 @@ export function Data() {
     to?: Date;
   }>({});
 
-  // Derived state: filtered entries based on search and date range
-  const filteredEntries = React.useMemo(() => {
-    let filtered = entries;
+  // -- Data fetch --
 
-    // Text search filter
+  const fetchSessions = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await SessionService.getAll();
+      setSessions(data);
+    } catch (err) {
+      console.error("Failed to load sessions:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to load sessions from the database."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  // -- Derived: filtered sessions --
+
+  const filteredSessions = React.useMemo(() => {
+    let filtered = sessions;
+
+    // Text search: match against date string (ISO) for now.
+    // Offer-level store search requires loading all offers — deferred to a
+    // future enhancement to keep the initial render fast.
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (e) =>
-          e.image_name.toLowerCase().includes(query) ||
-          e.extracted_text.toLowerCase().includes(query)
-      );
+      filtered = filtered.filter((s) => s.date.toLowerCase().includes(query));
     }
 
-    // Date range filter
+    // Date range filter — compare session.date (YYYY-MM-DD) against the range
     const range =
-      datePreset === "custom"
-        ? customDateRange
-        : getPresetDateRange(datePreset);
+      datePreset === "custom" ? customDateRange : getPresetDateRange(datePreset);
 
     if (range?.from) {
-      const fromTime = range.from.getTime();
-      const toTime = range.to?.getTime() ?? Date.now();
-      filtered = filtered.filter((e) => {
-        const entryTime = new Date(e.created_at).getTime();
-        return entryTime >= fromTime && entryTime <= toTime;
+      const fromMs = range.from.getTime();
+      const toMs = range.to?.getTime() ?? Date.now();
+      filtered = filtered.filter((s) => {
+        const sessionMs = parseISO(s.date).getTime();
+        return sessionMs >= fromMs && sessionMs <= toMs;
       });
     }
 
     return filtered;
-  }, [entries, searchQuery, datePreset, customDateRange]);
+  }, [sessions, searchQuery, datePreset, customDateRange]);
 
-  // Placeholder handlers — wire up once DB service is implemented
-  function handleExport() {
-    console.log("Export to CSV — implement with real data");
+  // -- Handlers --
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await exportToCsv(filteredSessions);
+    } catch (err) {
+      console.error("CSV export failed:", err);
+    } finally {
+      setExporting(false);
+    }
   }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-6 pt-4">
@@ -225,10 +485,31 @@ export function Data() {
         <CardHeader>
           <CardTitle>Data</CardTitle>
           <CardDescription>
-            View and manage all extracted OCR data. Filter by date range or search text.
+            View all recorded sessions and their individual offers. Filter by date or
+            search, then expand any row to see per-offer breakdown.
           </CardDescription>
         </CardHeader>
       </Card>
+
+      {/* Error banner */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Failed to load data</AlertTitle>
+          <AlertDescription className="flex items-center justify-between">
+            {error}
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-4 gap-2"
+              onClick={fetchSessions}
+            >
+              <RefreshCw className="size-3" />
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Filters toolbar */}
       <Card>
@@ -238,7 +519,7 @@ export function Data() {
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
-                placeholder="Search entries..."
+                placeholder="Search by date (e.g. 2025-01)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -254,8 +535,17 @@ export function Data() {
             />
 
             {/* Export button */}
-            <Button variant="outline" onClick={handleExport} className="gap-2">
-              <Download className="size-4" />
+            <Button
+              variant="outline"
+              onClick={handleExport}
+              disabled={exporting || filteredSessions.length === 0}
+              className="gap-2"
+            >
+              {exporting ? (
+                <RefreshCw className="size-4 animate-spin" />
+              ) : (
+                <Download className="size-4" />
+              )}
               Export CSV
             </Button>
           </div>
@@ -265,7 +555,9 @@ export function Data() {
       {/* Results summary */}
       <div className="flex items-center justify-between px-1">
         <p className="text-sm text-muted-foreground">
-          Showing {filteredEntries.length} of {entries.length} entries
+          {loading
+            ? "Loading sessions…"
+            : `Showing ${filteredSessions.length} of ${sessions.length} sessions`}
         </p>
       </div>
 
@@ -275,66 +567,36 @@ export function Data() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[180px]">Date</TableHead>
-                <TableHead className="w-[240px]">Image</TableHead>
-                <TableHead>Extracted Text</TableHead>
-                <TableHead className="w-[120px] text-center">Confidence</TableHead>
-                <TableHead className="w-[100px] text-center">Status</TableHead>
+                {/* Expand toggle spacer */}
+                <TableHead className="w-8" />
+                <TableHead className="w-[130px]">Date</TableHead>
+                <TableHead className="w-[120px]">Total</TableHead>
+                <TableHead>Pay / Tips</TableHead>
+                <TableHead className="w-[140px]">Active / Total</TableHead>
+                <TableHead className="w-[100px] text-center">Deliveries</TableHead>
+                <TableHead className="w-[90px] text-center">Offers</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredEntries.length === 0 ? (
+              {loading ? (
+                <TableSkeleton />
+              ) : filteredSessions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                    No entries found. Try adjusting your filters.
+                  <TableCell
+                    colSpan={7}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    No sessions found. Try adjusting your filters.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredEntries.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="font-mono text-xs">
-                      {format(new Date(entry.created_at), "MMM d, yyyy HH:mm")}
-                    </TableCell>
-                    <TableCell className="truncate text-sm" title={entry.image_name}>
-                      {entry.image_name}
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm line-clamp-2 whitespace-pre-wrap">
-                        {entry.extracted_text}
-                      </p>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <ConfidenceBadge score={entry.confidence} />
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Badge
-                        variant={
-                          entry.status === "processed"
-                            ? "default"
-                            : entry.status === "pending"
-                            ? "secondary"
-                            : "destructive"
-                        }
-                      >
-                        {entry.status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                filteredSessions.map((session) => (
+                  <ExpandableSessionRow key={session.id} session={session} />
                 ))
               )}
             </TableBody>
           </Table>
         </ScrollArea>
-      </Card>
-
-      {/* Placeholder message */}
-      <Card className="bg-muted/40">
-        <CardContent className="pt-6">
-          <p className="text-sm text-muted-foreground text-center">
-            💡 <strong>Coming soon:</strong> Click any row to view full details, edit extracted
-            text, or re-process images. Export functionality will save filtered data to CSV.
-          </p>
-        </CardContent>
       </Card>
     </div>
   );
