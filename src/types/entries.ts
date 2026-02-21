@@ -20,6 +20,8 @@ export interface Day {
   week_id: number | null;    // FK → weeks.id
   date: string;              // ISO "YYYY-MM-DD"
   total_earnings: number | null;
+  base_pay: number | null;   // "DoorDash pay" — only present on expanded earnings screenshots
+  tips: number | null;       // "Customer tips" — only present on expanded earnings screenshots
   start_time: string | null; // "HH:MM" 24h
   end_time: string | null;   // "HH:MM" 24h
   active_time: number | null; // minutes

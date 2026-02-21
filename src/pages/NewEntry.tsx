@@ -21,7 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 
 import { recognizeImage, type OcrProgressCallback } from "@/lib/ocr";
-import { EntryReviewSheet } from "@/components/entry-review/EntryReviewSheet";
+import { EntryReviewModal } from "@/components/entry-review/EntryReviewModal";
 import { ImageLightbox } from "@/components/image-lightbox/ImageLightbox";
 
 // ---------------------------------------------------------------------------
@@ -471,8 +471,7 @@ export function NewEntry() {
         </div>
       )}
 
-      {/* Entry Review Sheet — slides in when an entry is opened for review */}
-      <EntryReviewSheet
+       <EntryReviewModal
         open={reviewEntryId !== null}
         onOpenChange={(open) => { if (!open) setReviewEntryId(null); }}
         rawText={reviewEntry?.result ?? ""}

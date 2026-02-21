@@ -82,10 +82,16 @@ export const DayService = {
   async create(data: DayInsert): Promise<number> {
     const database = await getDb();
     const result = await database.execute(
-      `INSERT INTO days (week_id, date, total_earnings, start_time, end_time, active_time, total_time, deliveries)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [data.week_id, data.date, data.total_earnings, data.start_time, data.end_time,
-       data.active_time, data.total_time, data.deliveries]
+      `INSERT INTO days
+         (week_id, date, total_earnings, base_pay, tips,
+          start_time, end_time, active_time, total_time, deliveries)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        data.week_id, data.date, data.total_earnings,
+        data.base_pay, data.tips,
+        data.start_time, data.end_time,
+        data.active_time, data.total_time, data.deliveries,
+      ]
     );
     return result.lastInsertId;
   },
@@ -118,17 +124,24 @@ export const DayService = {
     const database = await getDb();
     await database.execute(
       `UPDATE days SET
-        week_id        = COALESCE($1, week_id),
-        date           = COALESCE($2, date),
-        total_earnings = COALESCE($3, total_earnings),
-        start_time     = COALESCE($4, start_time),
-        end_time       = COALESCE($5, end_time),
-        active_time    = COALESCE($6, active_time),
-        total_time     = COALESCE($7, total_time),
-        deliveries     = COALESCE($8, deliveries)
-       WHERE id = $9`,
-      [data.week_id, data.date, data.total_earnings, data.start_time,
-       data.end_time, data.active_time, data.total_time, data.deliveries, id]
+        week_id        = COALESCE($1,  week_id),
+        date           = COALESCE($2,  date),
+        total_earnings = COALESCE($3,  total_earnings),
+        base_pay       = COALESCE($4,  base_pay),
+        tips           = COALESCE($5,  tips),
+        start_time     = COALESCE($6,  start_time),
+        end_time       = COALESCE($7,  end_time),
+        active_time    = COALESCE($8,  active_time),
+        total_time     = COALESCE($9,  total_time),
+        deliveries     = COALESCE($10, deliveries)
+       WHERE id = $11`,
+      [
+        data.week_id, data.date, data.total_earnings,
+        data.base_pay, data.tips,
+        data.start_time, data.end_time,
+        data.active_time, data.total_time, data.deliveries,
+        id,
+      ]
     );
   },
 
@@ -190,7 +203,7 @@ export const OfferService = {
   /** Delete all offers for a day — used when re-saving after edits. */
   async deleteByDayId(dayId: number): Promise<void> {
     const database = await getDb();
-    await database.execute("DELETE FROM offers WHERE day_id = $1", [dayId]);
+    await database.execute("DELETE FROM offers WHERE day_id = $1", [id]);
   },
 };
 

@@ -60,10 +60,12 @@ pub fn run() {
                                     week_id        INTEGER REFERENCES weeks(id) ON DELETE SET NULL,
                                     date           TEXT    NOT NULL,
                                     total_earnings REAL,
-                                    start_time     TEXT,                   -- HH:MM 24h
-                                    end_time       TEXT,                   -- HH:MM 24h
-                                    active_time    INTEGER,                -- minutes
-                                    total_time     INTEGER,                -- minutes
+                                    base_pay       REAL,                -- DoorDash pay — only on expanded earnings screenshots
+                                    tips           REAL,                -- Customer tips — only on expanded earnings screenshots
+                                    start_time     TEXT,                -- HH:MM 24h
+                                    end_time       TEXT,                -- HH:MM 24h
+                                    active_time    INTEGER,             -- minutes
+                                    total_time     INTEGER,             -- minutes
                                     deliveries     INTEGER,
                                     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
                                 );
@@ -83,6 +85,7 @@ pub fn run() {
                             ",
                             kind: MigrationKind::Up,
                         },
+
                     ],
                 )
                 .build(),

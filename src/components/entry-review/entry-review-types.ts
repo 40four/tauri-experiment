@@ -17,6 +17,8 @@ export interface OfferFormRow {
 export interface DayFormState {
   date: string;            // "YYYY-MM-DD"
   total_earnings: string;  // e.g. "45.23"
+  base_pay: string;        // "DoorDash pay" — empty string when not present in screenshot
+  tips: string;            // "Customer tips" — empty string when not present in screenshot
   start_time: string;      // "HH:MM"
   end_time: string;        // "HH:MM"
   active_time: string;     // "Xh Ym" human-readable

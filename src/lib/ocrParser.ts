@@ -38,6 +38,8 @@ export interface ParsedWeek {
 export interface ParsedDay {
   date: string | null;               // ISO "YYYY-MM-DD"
   total_earnings: number | null;
+  base_pay: number | null;           // "DoorDash pay" line — only present on expanded earnings screenshots
+  tips: number | null;               // "Customer tips" line — only present on expanded earnings screenshots
   start_time: string | null;         // "HH:MM" 24h
   end_time: string | null;           // "HH:MM" 24h
   active_time: number | null;        // minutes
@@ -107,7 +109,7 @@ function parseTime(raw: string): string | null {
  */
 function parseLooseDate(raw: string, year?: number): string | null {
   const y = year ?? new Date().getFullYear();
-  // "Jan 6", "January 6", "Jan 6 2024"
+  // "Jan 6", "January 6", "Jan 6 2024", "Jan 6, 2024"
   const match = raw.match(/([A-Za-z]+)\s+(\d{1,2})(?:,?\s*(\d{4}))?/);
   if (!match) return null;
   const month = MONTH_MAP[match[1].toLowerCase()];
@@ -122,19 +124,54 @@ function parseLooseDate(raw: string, year?: number): string | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Heuristic: if the text contains "week of" or a date range with an em-dash
- * between two month+day combos, treat it as a weekly summary.
+ * Detects whether a block of OCR text represents a weekly or daily summary.
+ *
+ * Detection priority (highest → lowest confidence signals):
+ *
+ * WEEK signals:
+ *  1. Explicit "Dashes" section header (DoorDash week summaries list individual
+ *     dashes below a "Dashes" label — a uniquely week-level construct).
+ *  2. "Week of" keyword.
+ *  3. Compact same-month range header "Feb 9-15" (one month, two day numbers).
+ *  4. Full cross-month range header "Jan 6 – Jan 12".
+ *
+ * DAY signals (checked AFTER all week signals to avoid false positives — week
+ * summaries contain inline weekday labels like "Tuesday, Feb 10 $19.95 >" which
+ * would otherwise trigger the old weekday-at-line-start heuristic):
+ *  5. "Start Time" / "End Time" labels (day-specific detail).
+ *  6. Date with explicit year and no range: "Feb 8, 2026".
+ *  7. Weekday-prefixed date AND start/end time (belt-and-suspenders for older
+ *     screenshot formats).
  */
 function detectEntryType(text: string): OcrEntryType {
-  const lower = text.toLowerCase();
-  if (/week\s+of/i.test(lower)) return "week";
+  // -- Week signals (checked first) --
 
-  // e.g. "Dec 30 – Jan 5" or "Jan 6 - Jan 12"
+  // "Dashes" as a standalone section label is a strong week indicator.
+  // DoorDash week summaries show a "Dashes" header above the list of individual dashes.
+  if (/^\s*dashes\s*$/im.test(text)) return "week";
+
+  if (/week\s+of/i.test(text)) return "week";
+
+  // Compact same-month range: "Feb 9-15", "Feb 9 – 15"
+  // Pattern: Month + start_day + dash/en-dash/em-dash + end_day (no second month name)
+  if (/[a-z]{3,9}\s+\d{1,2}\s*[–—-]+\s*\d{1,2}(?!\s*[a-z])/i.test(text)) return "week";
+
+  // Full cross-month range: "Dec 30 – Jan 5" or "Jan 6 - Jan 12"
   if (/[a-z]{3,9}\s+\d{1,2}\s*[–—-]+\s*[a-z]{3,9}\s+\d{1,2}/i.test(text)) return "week";
 
-  // Daily pattern: weekday name at the start of a line
-  if (/^(mon|tue|wed|thu|fri|sat|sun)/im.test(text)) return "day";
-  if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/im.test(text)) return "day";
+  // -- Day signals (checked after all week signals) --
+
+  // "Start Time" / "End Time" labelled fields are exclusive to day summaries.
+  if (/start\s+time/i.test(text) || /end\s+time/i.test(text)) return "day";
+
+  // Date with explicit year: "Feb 8, 2026" (no range, no second date)
+  if (/[a-z]{3,9}\s+\d{1,2},\s*\d{4}/i.test(text)) return "day";
+
+  // Weekday prefix + start/end time (older screenshot format, belt-and-suspenders)
+  const hasWeekdayLine =
+    /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*/im.test(text) ||
+    /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/im.test(text);
+  if (hasWeekdayLine && /start\s+time|end\s+time/i.test(text)) return "day";
 
   return "unknown";
 }
@@ -145,26 +182,36 @@ function detectEntryType(text: string): OcrEntryType {
 
 function parseWeek(text: string): ParsedWeek {
   // --- Date range ---
-  // "Week of Dec 30 – Jan 5" or "Jan 6 – Jan 12"
   let date_start: string | null = null;
   let date_end: string | null = null;
 
-  const rangeMatch = text.match(
+  // Try full cross-month range first: "Jan 6 – Jan 12"
+  const fullRangeMatch = text.match(
     /([A-Za-z]+\s+\d{1,2})\s*[–—-]+\s*([A-Za-z]+\s+\d{1,2})/
   );
-  if (rangeMatch) {
-    date_start = parseLooseDate(rangeMatch[1]);
-    date_end = parseLooseDate(rangeMatch[2]);
+  if (fullRangeMatch) {
+    date_start = parseLooseDate(fullRangeMatch[1]);
+    date_end   = parseLooseDate(fullRangeMatch[2]);
 
-    // If end month < start month, the start is likely prior year (Dec→Jan wrap)
+    // Handle Dec→Jan year wrap: if end month < start month, end is next year
     if (date_start && date_end) {
       const startMonth = parseInt(date_start.split("-")[1]);
-      const endMonth = parseInt(date_end.split("-")[1]);
+      const endMonth   = parseInt(date_end.split("-")[1]);
       if (endMonth < startMonth) {
-        // End date might be in the next year
         const endYear = parseInt(date_end.split("-")[0]) + 1;
         date_end = `${endYear}-${date_end.slice(5)}`;
       }
+    }
+  }
+
+  // Fallback: compact same-month range "Feb 9-15"
+  if (!date_start) {
+    const compactMatch = text.match(
+      /([A-Za-z]+)\s+(\d{1,2})\s*[–—-]+\s*(\d{1,2})(?!\s*[a-z])/i
+    );
+    if (compactMatch) {
+      date_start = parseLooseDate(`${compactMatch[1]} ${compactMatch[2]}`);
+      date_end   = parseLooseDate(`${compactMatch[1]} ${compactMatch[3]}`);
     }
   }
 
@@ -174,19 +221,32 @@ function parseWeek(text: string): ParsedWeek {
   const total_earnings = earningsMatch ? parseCurrency(earningsMatch[0]) : null;
 
   // --- Deliveries ---
-  const deliveriesMatch = text.match(/(\d+)\s+(?:completed\s+)?deliveri(?:es|ed)/i)
-    ?? text.match(/(?:completed\s+)?deliveries[:\s]+(\d+)/i)
-    ?? text.match(/(\d+)\s+dashes?/i);
-  const completed_deliveries = deliveriesMatch ? parseInt(deliveriesMatch[1]) : null;
+  // "Completed deliveries 7" or "7 deliveries"
+  const deliveriesMatch =
+    text.match(/completed\s+deliveries[:\s]+(\d+)/i) ??
+    text.match(/(\d+)\s+completed\s+deliveri(?:es|ed)/i) ??
+    text.match(/(\d+)\s+deliveri(?:es|ed)/i) ??
+    text.match(/deliveries[:\s]+(\d+)/i);
+  const completed_deliveries = deliveriesMatch
+    ? parseInt(deliveriesMatch[1])
+    : null;
 
   // --- Active time ---
-  const activeMatch = text.match(/active\s+time[:\s]+([\dhmins ]+)/i)
-    ?? text.match(/([\dh\s]+m(?:in)?)\s+active/i);
+  // Matches "Active time 2h 54m" with any amount of whitespace/newlines
+  const activeMatch =
+    text.match(/active\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/active\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i) ??
+    text.match(/active\s+time[:\s]+([\d]+\s*m(?:in)?)/i);
   const active_time = activeMatch ? parseDuration(activeMatch[1]) : null;
 
-  // --- Total time ---
-  const totalMatch = text.match(/total\s+time[:\s]+([\dhmins ]+)/i)
-    ?? text.match(/([\dh\s]+m(?:in)?)\s+(?:on\s+)?(?:dash|total)/i);
+  // --- Total (Dash) time ---
+  // DoorDash labels this "Dash time" on week summaries, not "Total time"
+  const totalMatch =
+    text.match(/dash\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/dash\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i) ??
+    text.match(/dash\s+time[:\s]+([\d]+\s*m(?:in)?)/i) ??
+    text.match(/total\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/total\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i);
   const total_time = totalMatch ? parseDuration(totalMatch[1]) : null;
 
   return { date_start, date_end, active_time, total_time, completed_deliveries, total_earnings };
@@ -198,67 +258,143 @@ function parseWeek(text: string): ParsedWeek {
 
 function parseDay(text: string): ParsedDay {
   // --- Date ---
-  // "Mon, Jan 6" / "Monday, January 6, 2024" / "Mon Jan 6"
-  const dateMatch = text.match(
+  // Priority 1: weekday-prefixed "Mon, Jan 6" / "Monday, Jan 6, 2024"
+  const weekdayDateMatch = text.match(
     /(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*[,\s]+([A-Za-z]+\s+\d{1,2}(?:,?\s*\d{4})?)/i
   );
-  const date = dateMatch ? parseLooseDate(dateMatch[1]) : null;
+  // Priority 2: standalone date with year "Feb 8, 2026" or "Feb 8,2026"
+  const standaloneYearMatch = text.match(
+    /\b([A-Za-z]+\s+\d{1,2},\s*\d{4})\b/
+  );
+
+  const dateRaw = weekdayDateMatch?.[1] ?? standaloneYearMatch?.[1] ?? null;
+  const date = dateRaw ? parseLooseDate(dateRaw) : null;
 
   // --- Total earnings ---
+  // First dollar amount found — typically the largest/most prominent one
   const earningsMatch = text.match(/\$[\d,]+\.\d{2}/);
   const total_earnings = earningsMatch ? parseCurrency(earningsMatch[0]) : null;
 
-  // --- Time range "10:32 AM – 3:44 PM" or "10:32 - 15:44" ---
+  // --- Time range ---
+  // Strategy 1: labelled fields on separate lines (most common in day screenshots)
+  //   "Start Time 10:27 AM" / "End Time 12:12 PM"
   let start_time: string | null = null;
   let end_time: string | null = null;
-  const timeRangeMatch = text.match(
-    /(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[–—-]+\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i
-  );
-  if (timeRangeMatch) {
-    start_time = parseTime(timeRangeMatch[1]);
-    end_time = parseTime(timeRangeMatch[2]);
-  }
 
-  // --- Active time ---
-  const activeMatch = text.match(/active\s+time[:\s]+([\dh\sm]+)/i)
-    ?? text.match(/([\dh\s]+m(?:in)?)\s+active/i);
-  const active_time = activeMatch ? parseDuration(activeMatch[1]) : null;
+  const startLabelMatch = text.match(/start\s+time[:\s]+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  const endLabelMatch   = text.match(/end\s+time[:\s]+(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+  if (startLabelMatch) start_time = parseTime(startLabelMatch[1]);
+  if (endLabelMatch)   end_time   = parseTime(endLabelMatch[1]);
 
-  // --- Total time ---
-  const totalMatch = text.match(/total\s+time[:\s]+([\dh\sm]+)/i)
-    ?? text.match(/([\dh\s]+m(?:in)?)\s+(?:on\s+)?(?:dash|total)/i);
-  const total_time = totalMatch ? parseDuration(totalMatch[1]) : null;
-
-  // --- Deliveries ---
-  const deliveriesMatch = text.match(/(\d+)\s+deliveri(?:es|ed)/i)
-    ?? text.match(/deliveries[:\s]+(\d+)/i);
-  const deliveries = deliveriesMatch ? parseInt(deliveriesMatch[1]) : null;
-
-  // --- Offers ---
-  // Each offer typically appears as "Restaurant Name  $X.XX" on its own line.
-  // We look for lines that have a store-like label followed by a dollar amount.
-  const offers: ParsedOffer[] = [];
-  const lines = text.split(/\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Skip lines that are obviously headers or summary data
-    if (/^(week|day|date|total|active|start|end|deliveri|dash|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)/i.test(trimmed)) continue;
-
-    // Look for a dollar amount at the end of the line
-    const offerMatch = trimmed.match(/^(.+?)\s+(\$[\d,]+\.\d{2})\s*$/);
-    if (offerMatch) {
-      const store = offerMatch[1].trim();
-      const earnings = parseCurrency(offerMatch[2]);
-      // Basic sanity: store name shouldn't be a pure number or very short
-      if (store.length > 2 && !/^\d+$/.test(store)) {
-        offers.push({ store, total_earnings: earnings });
-      }
+  // Strategy 2: inline time range "10:32 AM – 3:44 PM" (fallback for older format)
+  if (!start_time || !end_time) {
+    const timeRangeMatch = text.match(
+      /(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[–—-]+\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i
+    );
+    if (timeRangeMatch) {
+      if (!start_time) start_time = parseTime(timeRangeMatch[1]);
+      if (!end_time)   end_time   = parseTime(timeRangeMatch[2]);
     }
   }
 
-  return { date, total_earnings, start_time, end_time, active_time, total_time, deliveries, offers };
+  // --- Active time ---
+  const activeMatch =
+    text.match(/active\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/active\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i) ??
+    text.match(/active\s+time[:\s]+([\d]+\s*m(?:in)?)/i);
+  const active_time = activeMatch ? parseDuration(activeMatch[1]) : null;
+
+  // --- Total (Dash) time ---
+  // DoorDash labels this "Dash time" on day summaries as well
+  const totalMatch =
+    text.match(/dash\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/dash\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i) ??
+    text.match(/dash\s+time[:\s]+([\d]+\s*m(?:in)?)/i) ??
+    text.match(/total\s+time[:\s]+([\d]+\s*h(?:r|rs)?\s*[\d]+\s*m(?:in)?)/i) ??
+    text.match(/total\s+time[:\s]+([\d]+\s*h(?:r|rs)?)/i);
+  const total_time = totalMatch ? parseDuration(totalMatch[1]) : null;
+
+  // --- Deliveries ---
+  const deliveriesMatch =
+    text.match(/deliveries[:\s]+(\d+)/i) ??
+    text.match(/(\d+)\s+deliveri(?:es|ed)/i);
+  const deliveries = deliveriesMatch ? parseInt(deliveriesMatch[1]) : null;
+
+  // --- Base pay & tips (expanded earnings view) ---
+  // When the user taps the earnings total in the DoorDash app it expands to show:
+  //   "DoorDash pay  $12.95"
+  //   "Customer tips $21.25"
+  // These are NOT offers — they must be captured separately and excluded from
+  // the offer-parsing pass below.
+  const basePayMatch = text.match(/doordash\s+pay[:\s]+\$?([\d,]+\.?\d{0,2})/i);
+  const base_pay = basePayMatch ? parseCurrency(basePayMatch[1]) : null;
+
+  const tipsMatch = text.match(/customer\s+tips?[:\s]+\$?([\d,]+\.?\d{0,2})/i);
+  const tips = tipsMatch ? parseCurrency(tipsMatch[1]) : null;
+  // DoorDash day summaries list each accepted offer as:
+  //   "Store Name  v $X.XX"   — where "v" is Tesseract's misread of the ✓ checkmark
+  //   "Store Name  $X.XX"     — or without the artifact
+  //
+  // Store names commonly wrap across two OCR lines, e.g.:
+  //   Line A: "Taco Bell - 031435, Taco Bell"   (no dollar amount)
+  //   Line B: "- 031435 v $14.40"               (has the amount; fragment = "- 031435")
+  //
+  // We can't rely on fragment length to detect continuations — "- 031435" and
+  // "(2558)" are both long enough to fool a length threshold. Instead we use a
+  // *lookahead pre-join pass*: any non-dollar, non-skippable line immediately
+  // before a line that carries the offer amount pattern gets merged into it.
+  // This produces fully-joined offer lines before we run the extraction regex.
+
+  /** Lines that are never part of an offer name or amount */
+  const OFFER_SKIP = /^(week|day|date|total|active|start|end|deliveri|dash|offers?\s*$|dashes?\s*$|\d+\s+doordash\s+offer|doordash\s+pay|customer\s+tips?)/i;
+
+  /** An offer amount line: contains "v $X.XX" or just "$X.XX" near the end */
+  const OFFER_AMOUNT_LINE = /v?\s*\$[\d,]+\.\d{2}\s*[>]?\s*$/i;
+
+  const rawLines = text.split(/\n/);
+
+  // Pre-join pass: walk forward; when line[i] has no $ and line[i+1] has the
+  // offer amount pattern, merge them and skip line[i+1] on the next iteration.
+  const joinedLines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const cur  = rawLines[i].trim();
+    const next = rawLines[i + 1]?.trim() ?? "";
+
+    if (
+      cur &&
+      !OFFER_SKIP.test(cur) &&
+      !/\$/.test(cur) &&            // current line has no dollar sign
+      OFFER_AMOUNT_LINE.test(next)  // next line carries the amount
+    ) {
+      // Merge: current line is the name prefix, next line has the amount (and possibly a short suffix)
+      joinedLines.push(`${cur} ${next}`);
+      i++; // consume the next line — it's been merged
+    } else {
+      joinedLines.push(cur);
+    }
+  }
+
+  // Extraction pass: scan the (now pre-joined) lines for offer patterns
+  const offers: ParsedOffer[] = [];
+
+  for (const line of joinedLines) {
+    const trimmed = line.trim();
+    if (!trimmed || OFFER_SKIP.test(trimmed)) continue;
+
+    // Match "Store text  v $X.XX  >" — the "v" checkmark artifact is optional
+    const offerMatch = trimmed.match(/^(.+?)\s+v?\s*(\$[\d,]+\.\d{2})\s*[>]?\s*$/i);
+    if (!offerMatch) continue;
+
+    const store    = offerMatch[1].trim();
+    const earnings = parseCurrency(offerMatch[2]);
+
+    // Sanity: skip pure-digit or very short store names
+    if (store.length > 2 && !/^\d+$/.test(store)) {
+      offers.push({ store, total_earnings: earnings });
+    }
+  }
+
+  return { date, total_earnings, base_pay, tips, start_time, end_time, active_time, total_time, deliveries, offers };
 }
 
 // ---------------------------------------------------------------------------
