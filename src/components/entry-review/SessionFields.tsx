@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// DayFields
-// Renders the editable fields for a Day entry inside the review modal,
+// SessionFields
+// Renders the editable fields for a Session entry inside the review modal,
 // including the nested OffersFields sub-component.
 // ---------------------------------------------------------------------------
 
@@ -9,18 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { OffersFields } from "./OffersFields";
-import type { DayFormState } from "./types";
+import type { SessionFormState } from "./types";
 
-interface DayFieldsProps {
-  state: DayFormState;
-  onChange: (next: DayFormState) => void;
+interface SessionFieldsProps {
+  state: SessionFormState;
+  onChange: (next: SessionFormState) => void;
 }
 
 /** Generic helper to update one key of the form state */
-function field<K extends keyof DayFormState>(
+function field<K extends keyof SessionFormState>(
   key: K,
-  state: DayFormState,
-  onChange: (next: DayFormState) => void
+  state: SessionFormState,
+  onChange: (next: SessionFormState) => void
 ) {
   return (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...state, [key]: e.target.value });
@@ -66,8 +66,8 @@ function EarningsBreakdown({
   onChange,
   detected,
 }: {
-  state: DayFormState;
-  onChange: (next: DayFormState) => void;
+  state: SessionFormState;
+  onChange: (next: SessionFormState) => void;
   detected: boolean;
 }) {
   const [open, setOpen] = React.useState(detected);
@@ -99,17 +99,17 @@ function EarningsBreakdown({
       {open && (
         <div className="grid grid-cols-2 gap-3 pt-1">
           <div className="space-y-1.5">
-            <Label htmlFor="day-base-pay" className="text-xs">Base Pay</Label>
+            <Label htmlFor="session-base-pay" className="text-xs">Base Pay</Label>
             <CurrencyInput
-              id="day-base-pay"
+              id="session-base-pay"
               value={state.base_pay}
               onChange={(e) => onChange({ ...state, base_pay: e.target.value })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="day-tips" className="text-xs">Tips</Label>
+            <Label htmlFor="session-tips" className="text-xs">Tips</Label>
             <CurrencyInput
-              id="day-tips"
+              id="session-tips"
               value={state.tips}
               onChange={(e) => onChange({ ...state, tips: e.target.value })}
             />
@@ -124,17 +124,17 @@ function EarningsBreakdown({
 // Main component
 // ---------------------------------------------------------------------------
 
-export function DayFields({ state, onChange }: DayFieldsProps) {
-  // Derive whether the earnings breakdown was detected by OCR — if so, start expanded
+export function SessionFields({ state, onChange }: SessionFieldsProps) {
+  // Start breakdown expanded if OCR detected either value
   const hasBreakdown = state.base_pay !== "" || state.tips !== "";
 
   return (
     <div className="grid gap-4">
       {/* Date */}
       <div className="space-y-1.5">
-        <Label htmlFor="day-date">Date</Label>
+        <Label htmlFor="session-date">Date</Label>
         <Input
-          id="day-date"
+          id="session-date"
           type="date"
           value={state.date}
           onChange={field("date", state, onChange)}
@@ -144,35 +144,31 @@ export function DayFields({ state, onChange }: DayFieldsProps) {
       {/* Total earnings + collapsible breakdown */}
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <Label htmlFor="day-earnings">Total Earnings</Label>
+          <Label htmlFor="session-earnings">Total Earnings</Label>
           <CurrencyInput
-            id="day-earnings"
+            id="session-earnings"
             value={state.total_earnings}
             onChange={field("total_earnings", state, onChange)}
           />
         </div>
-        <EarningsBreakdown
-          state={state}
-          onChange={onChange}
-          detected={hasBreakdown}
-        />
+        <EarningsBreakdown state={state} onChange={onChange} detected={hasBreakdown} />
       </div>
 
       {/* Time range */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="day-start-time">Start Time</Label>
+          <Label htmlFor="session-start-time">Start Time</Label>
           <Input
-            id="day-start-time"
+            id="session-start-time"
             type="time"
             value={state.start_time}
             onChange={field("start_time", state, onChange)}
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="day-end-time">End Time</Label>
+          <Label htmlFor="session-end-time">End Time</Label>
           <Input
-            id="day-end-time"
+            id="session-end-time"
             type="time"
             value={state.end_time}
             onChange={field("end_time", state, onChange)}
@@ -180,21 +176,21 @@ export function DayFields({ state, onChange }: DayFieldsProps) {
         </div>
       </div>
 
-      {/* Active / Total time */}
+      {/* Active / Dash time */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="day-active-time">Active Time</Label>
+          <Label htmlFor="session-active-time">Active Time</Label>
           <Input
-            id="day-active-time"
+            id="session-active-time"
             value={state.active_time}
             onChange={field("active_time", state, onChange)}
             placeholder="e.g. 1h 30m"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="day-total-time">Dash Time</Label>
+          <Label htmlFor="session-total-time">Dash Time</Label>
           <Input
-            id="day-total-time"
+            id="session-total-time"
             value={state.total_time}
             onChange={field("total_time", state, onChange)}
             placeholder="e.g. 1h 44m"
@@ -202,22 +198,35 @@ export function DayFields({ state, onChange }: DayFieldsProps) {
         </div>
       </div>
 
-      {/* Deliveries */}
-      <div className="space-y-1.5">
-        <Label htmlFor="day-deliveries">Deliveries</Label>
-        <Input
-          id="day-deliveries"
-          type="number"
-          min={0}
-          value={state.deliveries}
-          onChange={field("deliveries", state, onChange)}
-          placeholder="e.g. 5"
-        />
+      {/* Offers count + Deliveries — side by side since they're related counts */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="session-offers-count">Offers</Label>
+          <Input
+            id="session-offers-count"
+            type="number"
+            min={0}
+            value={state.offers_count}
+            onChange={field("offers_count", state, onChange)}
+            placeholder="e.g. 5"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="session-deliveries">Deliveries</Label>
+          <Input
+            id="session-deliveries"
+            type="number"
+            min={0}
+            value={state.deliveries}
+            onChange={field("deliveries", state, onChange)}
+            placeholder="e.g. 5"
+          />
+        </div>
       </div>
 
       <Separator />
 
-      {/* Offers */}
+      {/* Individual offer line items */}
       <OffersFields
         offers={state.offers}
         onChange={(offers) => onChange({ ...state, offers })}

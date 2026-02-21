@@ -45,43 +45,31 @@ pub fn run() {
                             version: 2,
                             description: "create_earnings_tables",
                             sql: "
-                                CREATE TABLE IF NOT EXISTS weeks (
-                                    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    date_start           TEXT    NOT NULL,
-                                    date_end             TEXT    NOT NULL,
-                                    active_time          INTEGER,          -- minutes
-                                    total_time           INTEGER,          -- minutes
-                                    completed_deliveries INTEGER,
-                                    created_at           DATETIME DEFAULT CURRENT_TIMESTAMP
-                                );
-
-                                CREATE TABLE IF NOT EXISTS days (
+                                CREATE TABLE IF NOT EXISTS sessions (
                                     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    week_id        INTEGER REFERENCES weeks(id) ON DELETE SET NULL,
                                     date           TEXT    NOT NULL,
                                     total_earnings REAL,
-                                    base_pay       REAL,                -- DoorDash pay — only on expanded earnings screenshots
-                                    tips           REAL,                -- Customer tips — only on expanded earnings screenshots
+                                    base_pay       REAL,                -- 'DoorDash pay' — only on expanded earnings screenshots
+                                    tips           REAL,                -- 'Customer tips' — only on expanded earnings screenshots
                                     start_time     TEXT,                -- HH:MM 24h
                                     end_time       TEXT,                -- HH:MM 24h
                                     active_time    INTEGER,             -- minutes
                                     total_time     INTEGER,             -- minutes
+                                    offers_count   INTEGER,             -- raw 'Offers N' value from OCR header
                                     deliveries     INTEGER,
                                     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
                                 );
 
                                 CREATE TABLE IF NOT EXISTS offers (
                                     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    day_id         INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
+                                    session_id     INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
                                     store          TEXT,
                                     total_earnings REAL,
                                     created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
                                 );
 
-                                -- Index for fast date-range queries on days
-                                CREATE INDEX IF NOT EXISTS idx_days_date    ON days(date);
-                                CREATE INDEX IF NOT EXISTS idx_days_week_id ON days(week_id);
-                                CREATE INDEX IF NOT EXISTS idx_offers_day_id ON offers(day_id);
+                                CREATE INDEX IF NOT EXISTS idx_sessions_date     ON sessions(date);
+                                CREATE INDEX IF NOT EXISTS idx_offers_session_id ON offers(session_id);
                             ",
                             kind: MigrationKind::Up,
                         },

@@ -3,6 +3,6 @@
 // Import from "@/components/entry-review" rather than deep paths.
 // ---------------------------------------------------------------------------
 
-export { EntryReviewSheet } from "./EntryReviewSheet";
-export type { EntryReviewSheetProps } from "./EntryReviewSheet";
-export type { DayFormState, WeekFormState, OfferFormRow } from "./types";
+export { EntryReviewModal } from "./EntryReviewModal";
+export type { EntryReviewModalProps } from "./EntryReviewModal";
+export type { SessionFormState, OfferFormRow } from "./types";

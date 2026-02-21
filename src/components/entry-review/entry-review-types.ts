@@ -14,7 +14,7 @@ export interface OfferFormRow {
   total_earnings: string; // e.g. "8.50" — user-editable
 }
 
-export interface DayFormState {
+export interface SessionFormState {
   date: string;            // "YYYY-MM-DD"
   total_earnings: string;  // e.g. "45.23"
   base_pay: string;        // "DoorDash pay" — empty string when not present in screenshot
@@ -23,15 +23,7 @@ export interface DayFormState {
   end_time: string;        // "HH:MM"
   active_time: string;     // "Xh Ym" human-readable
   total_time: string;      // "Xh Ym"
+  offers_count: string;    // integer string — raw OCR header count
   deliveries: string;      // integer string
   offers: OfferFormRow[];
-}
-
-export interface WeekFormState {
-  date_start: string;          // "YYYY-MM-DD"
-  date_end: string;            // "YYYY-MM-DD"
-  active_time: string;         // "Xh Ym"
-  total_time: string;          // "Xh Ym"
-  completed_deliveries: string; // integer string
-  total_earnings: string;       // for display context, not saved to week table
 }

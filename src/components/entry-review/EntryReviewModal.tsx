@@ -1,16 +1,13 @@
 // ---------------------------------------------------------------------------
 // EntryReviewModal
-// A centered Dialog modal for reviewing and saving OCR-parsed entries.
-// Replaces the previous right-side Sheet (EntryReviewSheet) for improved
-// readability and form ergonomics — a modal keeps focus, centers the content,
-// and provides more horizontal space for two-column field layouts.
+// A centered Dialog modal for reviewing and saving OCR-parsed session entries.
+// No tabs — sessions are the only entry type now.
 //
 // Architecture:
 //   - Parses OCR text on open via parseOcrText()
-//   - Converts ParsedDay / ParsedWeek → DayFormState / WeekFormState
-//   - Shows Tabs for "Day" vs "Week" — OCR detection pre-selects the tab
-//   - On save, converts form strings back to typed DB values and calls the
-//     appropriate service functions
+//   - Converts ParsedSession → SessionFormState
+//   - On save, converts form strings back to typed DB values and calls
+//     saveSessionWithOffers()
 // ---------------------------------------------------------------------------
 
 import * as React from "react";
@@ -25,7 +22,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -37,16 +33,15 @@ import {
   parseDurationString,
   type OcrParseResult,
 } from "@/lib/ocrParser";
-import { WeekService, saveDayWithOffers } from "@/services/entryService";
-import { WeekFields } from "./WeekFields";
-import { DayFields } from "./DayFields";
-import type { DayFormState, WeekFormState, OfferFormRow } from "./types";
+import { saveSessionWithOffers } from "@/services/entryService";
+import { SessionFields } from "./SessionFields";
+import type { SessionFormState, OfferFormRow } from "./types";
 
 // ---------------------------------------------------------------------------
-// Conversion helpers — ParsedX → FormState
+// Conversion helpers — ParsedSession → SessionFormState
 // ---------------------------------------------------------------------------
 
-function parsedDayToFormState(parsed: OcrParseResult["day"]): DayFormState {
+function parsedSessionToFormState(parsed: OcrParseResult["session"]): SessionFormState {
   return {
     date: parsed?.date ?? "",
     total_earnings: parsed?.total_earnings?.toString() ?? "",
@@ -56,6 +51,7 @@ function parsedDayToFormState(parsed: OcrParseResult["day"]): DayFormState {
     end_time: parsed?.end_time ?? "",
     active_time: formatMinutes(parsed?.active_time ?? null),
     total_time: formatMinutes(parsed?.total_time ?? null),
+    offers_count: parsed?.offers_count?.toString() ?? "",
     deliveries: parsed?.deliveries?.toString() ?? "",
     offers: (parsed?.offers ?? []).map((o) => ({
       key: crypto.randomUUID(),
@@ -65,19 +61,8 @@ function parsedDayToFormState(parsed: OcrParseResult["day"]): DayFormState {
   };
 }
 
-function parsedWeekToFormState(parsed: OcrParseResult["week"]): WeekFormState {
-  return {
-    date_start: parsed?.date_start ?? "",
-    date_end: parsed?.date_end ?? "",
-    active_time: formatMinutes(parsed?.active_time ?? null),
-    total_time: formatMinutes(parsed?.total_time ?? null),
-    completed_deliveries: parsed?.completed_deliveries?.toString() ?? "",
-    total_earnings: parsed?.total_earnings?.toString() ?? "",
-  };
-}
-
 // ---------------------------------------------------------------------------
-// Helpers — FormState → DB types
+// Helpers — SessionFormState → DB insert values
 // ---------------------------------------------------------------------------
 
 function toNullableFloat(s: string): number | null {
@@ -114,19 +99,6 @@ function ConfidenceBadge({ score }: { score: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: detection badge
-// ---------------------------------------------------------------------------
-
-function DetectionBadge({ type }: { type: OcrParseResult["type"] }) {
-  if (type === "unknown") return null;
-  return (
-    <Badge variant="outline" className="capitalize">
-      {type} detected
-    </Badge>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -137,8 +109,8 @@ export interface EntryReviewModalProps {
   rawText: string;
   /** Tesseract confidence score if available */
   ocrConfidence?: number | null;
-  /** Called with the new day/week id after a successful save */
-  onSaved?: (type: "day" | "week", id: number) => void;
+  /** Called with the new session id after a successful save */
+  onSaved?: (id: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,81 +127,47 @@ export function EntryReviewModal({
   // Parse OCR once when the modal opens (or rawText changes)
   const parsed = React.useMemo(() => parseOcrText(rawText), [rawText]);
 
-  // Active tab — auto-selected from OCR detection
-  const [activeTab, setActiveTab] = React.useState<"day" | "week">(
-    parsed.type === "week" ? "week" : "day"
+  // Form state — re-initialized when parsed changes (new image reviewed)
+  const [formState, setFormState] = React.useState<SessionFormState>(
+    () => parsedSessionToFormState(parsed.session)
   );
 
-  // Form state for each tab — re-initialized when parsed changes
-  const [dayState, setDayState] = React.useState<DayFormState>(
-    () => parsedDayToFormState(parsed.day)
-  );
-  const [weekState, setWeekState] = React.useState<WeekFormState>(
-    () => parsedWeekToFormState(parsed.week)
-  );
-
-  // Re-populate when OCR result changes (new image reviewed)
   React.useEffect(() => {
-    setDayState(parsedDayToFormState(parsed.day));
-    setWeekState(parsedWeekToFormState(parsed.week));
-    setActiveTab(parsed.type === "week" ? "week" : "day");
+    setFormState(parsedSessionToFormState(parsed.session));
   }, [parsed]);
 
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Save handlers
+  // Save handler
   // ---------------------------------------------------------------------------
 
-  async function handleSaveDay() {
+  async function handleSave() {
     setSaving(true);
     setSaveError(null);
     try {
-      const dayId = await saveDayWithOffers(
+      const sessionId = await saveSessionWithOffers(
         {
-          week_id: null,
           date:
-            toNullableString(dayState.date) ??
+            toNullableString(formState.date) ??
             new Date().toISOString().slice(0, 10),
-          total_earnings: toNullableFloat(dayState.total_earnings),
-          base_pay: toNullableFloat(dayState.base_pay),
-          tips: toNullableFloat(dayState.tips),
-          start_time: toNullableString(dayState.start_time),
-          end_time: toNullableString(dayState.end_time),
-          active_time: parseDurationString(dayState.active_time),
-          total_time: parseDurationString(dayState.total_time),
-          deliveries: toNullableInt(dayState.deliveries),
+          total_earnings: toNullableFloat(formState.total_earnings),
+          base_pay: toNullableFloat(formState.base_pay),
+          tips: toNullableFloat(formState.tips),
+          start_time: toNullableString(formState.start_time),
+          end_time: toNullableString(formState.end_time),
+          active_time: parseDurationString(formState.active_time),
+          total_time: parseDurationString(formState.total_time),
+          offers_count: toNullableInt(formState.offers_count),
+          deliveries: toNullableInt(formState.deliveries),
         },
-        formOffersToDB(dayState.offers)
+        formOffersToDB(formState.offers)
       );
-      onSaved?.("day", dayId);
+      onSaved?.(sessionId);
       onOpenChange(false);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save day entry");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSaveWeek() {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const weekId = await WeekService.create({
-        date_start:
-          toNullableString(weekState.date_start) ??
-          new Date().toISOString().slice(0, 10),
-        date_end: toNullableString(weekState.date_end),
-        active_time: parseDurationString(weekState.active_time),
-        total_time: parseDurationString(weekState.total_time),
-        completed_deliveries: toNullableInt(weekState.completed_deliveries),
-        total_earnings: toNullableFloat(weekState.total_earnings),
-      });
-      onSaved?.("week", weekId);
-      onOpenChange(false);
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save week entry");
+      setSaveError(err instanceof Error ? err.message : "Failed to save session");
     } finally {
       setSaving(false);
     }
@@ -243,64 +181,35 @@ export function EntryReviewModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
         max-w-2xl gives the form comfortable two-column space.
-        The h-[90vh] + flex layout lets the footer stay pinned while the
-        form content scrolls — important for entries with many offers.
+        h-[90vh] + flex lets the footer stay pinned while content scrolls.
       */}
       <DialogContent className="max-w-2xl h-[90vh] flex flex-col gap-0 p-0">
         {/* Header */}
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
           <div className="flex items-center gap-2 flex-wrap">
             <FileText className="size-4 text-muted-foreground" />
-            <DialogTitle>Review Entry</DialogTitle>
-            <div className="flex gap-1.5 ml-auto">
-              <DetectionBadge type={parsed.type} />
-              {ocrConfidence != null && (
-                <ConfidenceBadge score={ocrConfidence} />
-              )}
-            </div>
+            <DialogTitle>Review Session</DialogTitle>
+            {ocrConfidence != null && (
+              <ConfidenceBadge score={ocrConfidence} />
+            )}
           </div>
           <DialogDescription>
-            Verify and correct the fields extracted from the screenshot, then
-            save.
+            Verify and correct the fields extracted from the screenshot, then save.
           </DialogDescription>
         </DialogHeader>
 
         <Separator className="shrink-0" />
 
-        {/* Tabs + scrollable form area */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <Tabs
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as "day" | "week")}
-            className="h-full flex flex-col"
-          >
-            {/* Tab triggers */}
-            <div className="px-6 pt-4 pb-2 shrink-0">
-              <TabsList className="w-full">
-                <TabsTrigger value="day" className="flex-1">
-                  Day
-                </TabsTrigger>
-                <TabsTrigger value="week" className="flex-1">
-                  Week
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            {/* Scrollable tab content */}
-            <ScrollArea className="flex-1 min-h-0">
-              <TabsContent value="day" className="px-6 pb-6 mt-0">
-                <DayFields state={dayState} onChange={setDayState} />
-              </TabsContent>
-              <TabsContent value="week" className="px-6 pb-6 mt-0">
-                <WeekFields state={weekState} onChange={setWeekState} />
-              </TabsContent>
-            </ScrollArea>
-          </Tabs>
-        </div>
+        {/* Scrollable form */}
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="px-6 py-4">
+            <SessionFields state={formState} onChange={setFormState} />
+          </div>
+        </ScrollArea>
 
         <Separator className="shrink-0" />
 
-        {/* Footer — pinned to the bottom, outside the scroll area */}
+        {/* Pinned footer */}
         <DialogFooter className="px-6 py-4 shrink-0 flex-col gap-2">
           {saveError && (
             <Alert variant="destructive" className="w-full">
@@ -316,13 +225,9 @@ export function EntryReviewModal({
             >
               Cancel
             </Button>
-            <Button
-              onClick={activeTab === "day" ? handleSaveDay : handleSaveWeek}
-              disabled={saving}
-              className="gap-1.5"
-            >
+            <Button onClick={handleSave} disabled={saving} className="gap-1.5">
               <Save className="size-4" />
-              {saving ? "Saving…" : `Save ${activeTab === "day" ? "Day" : "Week"}`}
+              {saving ? "Saving…" : "Save Session"}
             </Button>
           </div>
         </DialogFooter>

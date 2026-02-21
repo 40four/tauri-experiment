@@ -390,7 +390,7 @@ export function NewEntry() {
     setReviewEntryId(id);
   }
 
-  function handleEntrySaved(type: "day" | "week", _id: number) {
+  function handleEntrySaved(id: number) {
     // Mark the reviewed entry as saved
     if (reviewEntryId) {
       setEntries((prev) =>

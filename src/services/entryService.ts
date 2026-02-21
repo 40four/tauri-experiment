@@ -1,14 +1,13 @@
 // ---------------------------------------------------------------------------
 // Entry Service
-// Thin data-access layer over the Tauri SQL plugin for the Week, Day, and
-// Offer tables.  All DB access goes through a lazily-initialized singleton
+// Thin data-access layer over the Tauri SQL plugin for the Session and
+// Offer tables. All DB access goes through a lazily-initialized singleton
 // connection, mirroring the pattern established in authService.ts.
 // ---------------------------------------------------------------------------
 
 import Database from "@tauri-apps/plugin-sql";
 import type {
-  Week, WeekInsert,
-  Day, DayInsert, DayWithOffers,
+  Session, SessionInsert, SessionWithOffers,
   Offer, OfferInsert,
 } from "@/types/entries";
 
@@ -22,124 +21,73 @@ async function getDb(): Promise<Database> {
 }
 
 // ---------------------------------------------------------------------------
-// Week operations
+// Session operations
 // ---------------------------------------------------------------------------
 
-export const WeekService = {
-  /** Insert a new week row and return its generated id. */
-  async create(data: WeekInsert): Promise<number> {
+export const SessionService = {
+  /** Insert a new session row and return its generated id. */
+  async create(data: SessionInsert): Promise<number> {
     const database = await getDb();
     const result = await database.execute(
-      `INSERT INTO weeks (date_start, date_end, active_time, total_time, completed_deliveries)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [data.date_start, data.date_end, data.active_time, data.total_time, data.completed_deliveries]
-    );
-    return result.lastInsertId;
-  },
-
-  async getAll(): Promise<Week[]> {
-    const database = await getDb();
-    return database.select<Week[]>(
-      "SELECT * FROM weeks ORDER BY date_start DESC"
-    );
-  },
-
-  async getById(id: number): Promise<Week | null> {
-    const database = await getDb();
-    const rows = await database.select<Week[]>(
-      "SELECT * FROM weeks WHERE id = $1",
-      [id]
-    );
-    return rows[0] ?? null;
-  },
-
-  async update(id: number, data: Partial<WeekInsert>): Promise<void> {
-    const database = await getDb();
-    await database.execute(
-      `UPDATE weeks SET
-        date_start = COALESCE($1, date_start),
-        date_end   = COALESCE($2, date_end),
-        active_time = COALESCE($3, active_time),
-        total_time  = COALESCE($4, total_time),
-        completed_deliveries = COALESCE($5, completed_deliveries)
-       WHERE id = $6`,
-      [data.date_start, data.date_end, data.active_time, data.total_time, data.completed_deliveries, id]
-    );
-  },
-
-  async delete(id: number): Promise<void> {
-    const database = await getDb();
-    await database.execute("DELETE FROM weeks WHERE id = $1", [id]);
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Day operations
-// ---------------------------------------------------------------------------
-
-export const DayService = {
-  /** Insert a new day and return its generated id. */
-  async create(data: DayInsert): Promise<number> {
-    const database = await getDb();
-    const result = await database.execute(
-      `INSERT INTO days
-         (week_id, date, total_earnings, base_pay, tips,
-          start_time, end_time, active_time, total_time, deliveries)
+      `INSERT INTO sessions
+         (date, total_earnings, base_pay, tips,
+          start_time, end_time, active_time, total_time,
+          offers_count, deliveries)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
-        data.week_id, data.date, data.total_earnings,
-        data.base_pay, data.tips,
-        data.start_time, data.end_time,
-        data.active_time, data.total_time, data.deliveries,
+        data.date, data.total_earnings, data.base_pay, data.tips,
+        data.start_time, data.end_time, data.active_time, data.total_time,
+        data.offers_count, data.deliveries,
       ]
     );
     return result.lastInsertId;
   },
 
-  async getAll(): Promise<Day[]> {
+  async getAll(): Promise<Session[]> {
     const database = await getDb();
-    return database.select<Day[]>("SELECT * FROM days ORDER BY date DESC");
+    return database.select<Session[]>(
+      "SELECT * FROM sessions ORDER BY date DESC, start_time DESC"
+    );
   },
 
-  async getById(id: number): Promise<Day | null> {
+  async getById(id: number): Promise<Session | null> {
     const database = await getDb();
-    const rows = await database.select<Day[]>(
-      "SELECT * FROM days WHERE id = $1", [id]
+    const rows = await database.select<Session[]>(
+      "SELECT * FROM sessions WHERE id = $1", [id]
     );
     return rows[0] ?? null;
   },
 
-  /** Fetch a day and all of its offers in a single enriched object. */
-  async getWithOffers(id: number): Promise<DayWithOffers | null> {
-    const day = await DayService.getById(id);
-    if (!day) return null;
+  /** Fetch a session and all of its offers in a single enriched object. */
+  async getWithOffers(id: number): Promise<SessionWithOffers | null> {
+    const session = await SessionService.getById(id);
+    if (!session) return null;
     const database = await getDb();
     const offers = await database.select<Offer[]>(
-      "SELECT * FROM offers WHERE day_id = $1 ORDER BY id ASC", [id]
+      "SELECT * FROM offers WHERE session_id = $1 ORDER BY id ASC", [id]
     );
-    return { ...day, offers };
+    return { ...session, offers };
   },
 
-  async update(id: number, data: Partial<DayInsert>): Promise<void> {
+  async update(id: number, data: Partial<SessionInsert>): Promise<void> {
     const database = await getDb();
     await database.execute(
-      `UPDATE days SET
-        week_id        = COALESCE($1,  week_id),
-        date           = COALESCE($2,  date),
-        total_earnings = COALESCE($3,  total_earnings),
-        base_pay       = COALESCE($4,  base_pay),
-        tips           = COALESCE($5,  tips),
-        start_time     = COALESCE($6,  start_time),
-        end_time       = COALESCE($7,  end_time),
-        active_time    = COALESCE($8,  active_time),
-        total_time     = COALESCE($9,  total_time),
+      `UPDATE sessions SET
+        date           = COALESCE($1,  date),
+        total_earnings = COALESCE($2,  total_earnings),
+        base_pay       = COALESCE($3,  base_pay),
+        tips           = COALESCE($4,  tips),
+        start_time     = COALESCE($5,  start_time),
+        end_time       = COALESCE($6,  end_time),
+        active_time    = COALESCE($7,  active_time),
+        total_time     = COALESCE($8,  total_time),
+        offers_count   = COALESCE($9,  offers_count),
         deliveries     = COALESCE($10, deliveries)
        WHERE id = $11`,
       [
-        data.week_id, data.date, data.total_earnings,
-        data.base_pay, data.tips,
-        data.start_time, data.end_time,
-        data.active_time, data.total_time, data.deliveries,
+        data.date, data.total_earnings, data.base_pay, data.tips,
+        data.start_time, data.end_time, data.active_time, data.total_time,
+        data.offers_count, data.deliveries,
         id,
       ]
     );
@@ -148,7 +96,7 @@ export const DayService = {
   async delete(id: number): Promise<void> {
     const database = await getDb();
     // Offers are deleted via ON DELETE CASCADE in the schema
-    await database.execute("DELETE FROM days WHERE id = $1", [id]);
+    await database.execute("DELETE FROM sessions WHERE id = $1", [id]);
   },
 };
 
@@ -160,27 +108,27 @@ export const OfferService = {
   async create(data: OfferInsert): Promise<number> {
     const database = await getDb();
     const result = await database.execute(
-      "INSERT INTO offers (day_id, store, total_earnings) VALUES ($1, $2, $3)",
-      [data.day_id, data.store, data.total_earnings]
+      "INSERT INTO offers (session_id, store, total_earnings) VALUES ($1, $2, $3)",
+      [data.session_id, data.store, data.total_earnings]
     );
     return result.lastInsertId;
   },
 
-  /** Bulk-insert multiple offers for a day (used when saving OCR results). */
-  async bulkCreate(dayId: number, offers: Omit<OfferInsert, "day_id">[]): Promise<void> {
+  /** Bulk-insert multiple offers for a session (used when saving OCR results). */
+  async bulkCreate(sessionId: number, offers: Omit<OfferInsert, "session_id">[]): Promise<void> {
     const database = await getDb();
     for (const offer of offers) {
       await database.execute(
-        "INSERT INTO offers (day_id, store, total_earnings) VALUES ($1, $2, $3)",
-        [dayId, offer.store, offer.total_earnings]
+        "INSERT INTO offers (session_id, store, total_earnings) VALUES ($1, $2, $3)",
+        [sessionId, offer.store, offer.total_earnings]
       );
     }
   },
 
-  async getByDayId(dayId: number): Promise<Offer[]> {
+  async getBySessionId(sessionId: number): Promise<Offer[]> {
     const database = await getDb();
     return database.select<Offer[]>(
-      "SELECT * FROM offers WHERE day_id = $1 ORDER BY id ASC", [dayId]
+      "SELECT * FROM offers WHERE session_id = $1 ORDER BY id ASC", [sessionId]
     );
   },
 
@@ -200,28 +148,28 @@ export const OfferService = {
     await database.execute("DELETE FROM offers WHERE id = $1", [id]);
   },
 
-  /** Delete all offers for a day — used when re-saving after edits. */
-  async deleteByDayId(dayId: number): Promise<void> {
+  /** Delete all offers for a session — used when re-saving after edits. */
+  async deleteBySessionId(sessionId: number): Promise<void> {
     const database = await getDb();
-    await database.execute("DELETE FROM offers WHERE day_id = $1", [id]);
+    await database.execute("DELETE FROM offers WHERE session_id = $1", [sessionId]);
   },
 };
 
 // ---------------------------------------------------------------------------
-// Compound save — saves a parsed day + its offers atomically (sequentially)
+// Compound save — saves a parsed session + its offers atomically (sequentially)
 // ---------------------------------------------------------------------------
 
 /**
- * Saves a full day entry with nested offers.
- * Returns the new day id.
+ * Saves a full session entry with nested offers.
+ * Returns the new session id.
  */
-export async function saveDayWithOffers(
-  day: DayInsert,
-  offers: Omit<OfferInsert, "day_id">[]
+export async function saveSessionWithOffers(
+  session: SessionInsert,
+  offers: Omit<OfferInsert, "session_id">[]
 ): Promise<number> {
-  const dayId = await DayService.create(day);
+  const sessionId = await SessionService.create(session);
   if (offers.length > 0) {
-    await OfferService.bulkCreate(dayId, offers);
+    await OfferService.bulkCreate(sessionId, offers);
   }
-  return dayId;
+  return sessionId;
 }
