@@ -1,15 +1,15 @@
 // ---------------------------------------------------------------------------
 // Data Page
-// Displays all sessions from the SQLite DB with expandable offer rows.
-// Filtering: text search (date / store names), date-range presets + custom.
-// Export: streams filtered sessions + their offers to a CSV download.
+// Flat table of all sessions — every DB column visible. Clicking a row opens
+// the SessionDetailSheet for full read/edit view of that session + its offers.
+//
+// Filtering: text search against date + time fields, date-range presets + custom.
+// Export: CSV of filtered sessions with their offers.
 // ---------------------------------------------------------------------------
 
 import * as React from "react";
 import {
   Calendar as CalendarIcon,
-  ChevronDown,
-  ChevronRight,
   Download,
   Search,
   RefreshCw,
@@ -48,6 +48,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { SessionService, OfferService } from "@/services/entryService";
 import type { Session, Offer } from "@/types/entries";
+import { SessionDetailSheet } from "@/components/session-detail/SessionDetailSheet";
 
 // ---------------------------------------------------------------------------
 // Date Range Utilities
@@ -72,100 +73,62 @@ function getPresetDateRange(preset: DateRangePreset): { from: Date; to: Date } |
 }
 
 // ---------------------------------------------------------------------------
-// CSV Export Helper
-// Builds a CSV string from sessions + lazily-fetched offers, then triggers
-// a browser download. Called after the user clicks "Export CSV".
+// Formatting helpers
+// ---------------------------------------------------------------------------
+
+function fmt$(v: number | null): string {
+  return v !== null ? `$${v.toFixed(2)}` : "—";
+}
+
+function fmtMinutes(v: number | null): string {
+  if (v === null) return "—";
+  const h = Math.floor(v / 60);
+  const m = v % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// ---------------------------------------------------------------------------
+// CSV Export
 // ---------------------------------------------------------------------------
 
 async function exportToCsv(sessions: Session[]): Promise<void> {
   const rows: string[] = [
-    // Header row
     [
-      "Session ID",
-      "Date",
-      "Total Earnings",
-      "Base Pay",
-      "Tips",
-      "Start Time",
-      "End Time",
-      "Active Time (min)",
-      "Total Time (min)",
-      "Offers Count",
-      "Deliveries",
-      "Offer Store",
-      "Offer Earnings",
+      "Session ID", "Date", "Start", "End",
+      "Total Earnings", "Base Pay", "Tips",
+      "Active Time (min)", "Total Time (min)",
+      "Offers Count", "Deliveries",
+      "Offer Store", "Offer Earnings",
     ].join(","),
   ];
 
   for (const session of sessions) {
     const offers = await OfferService.getBySessionId(session.id);
-
+    const base = [
+      session.id, session.date,
+      session.start_time ?? "", session.end_time ?? "",
+      session.total_earnings ?? "", session.base_pay ?? "", session.tips ?? "",
+      session.active_time ?? "", session.total_time ?? "",
+      session.offers_count ?? "", session.deliveries ?? "",
+    ];
     if (offers.length === 0) {
-      // One row per session even if no offers
-      rows.push(
-        [
-          session.id,
-          session.date,
-          session.total_earnings ?? "",
-          session.base_pay ?? "",
-          session.tips ?? "",
-          session.start_time ?? "",
-          session.end_time ?? "",
-          session.active_time ?? "",
-          session.total_time ?? "",
-          session.offers_count ?? "",
-          session.deliveries ?? "",
-          "",
-          "",
-        ].join(",")
-      );
+      rows.push([...base, "", ""].join(","));
     } else {
-      // One row per offer, repeating session fields
-      offers.forEach((offer) => {
-        rows.push(
-          [
-            session.id,
-            session.date,
-            session.total_earnings ?? "",
-            session.base_pay ?? "",
-            session.tips ?? "",
-            session.start_time ?? "",
-            session.end_time ?? "",
-            session.active_time ?? "",
-            session.total_time ?? "",
-            session.offers_count ?? "",
-            session.deliveries ?? "",
-            `"${offer.store ?? ""}"`,
-            offer.total_earnings ?? "",
-          ].join(",")
-        );
-      });
+      offers.forEach((o) =>
+        rows.push([...base, `"${o.store ?? ""}"`, o.total_earnings ?? ""].join(","))
+      );
     }
   }
 
   const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
+  const url  = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url;
+  link.href     = url;
   link.download = `dashlens-export-${format(new Date(), "yyyy-MM-dd")}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-}
-
-// ---------------------------------------------------------------------------
-// Formatting Helpers
-// ---------------------------------------------------------------------------
-
-function formatMinutes(minutes: number | null): string {
-  if (minutes === null) return "—";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-function formatCurrency(value: number | null): string {
-  if (value === null) return "—";
-  return `$${value.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +148,6 @@ function DateRangePicker({
 }) {
   return (
     <div className="flex items-center gap-2">
-      {/* Quick preset tabs */}
       <Tabs value={preset} onValueChange={(v) => onPresetChange(v as DateRangePreset)}>
         <TabsList>
           <TabsTrigger value="today">Today</TabsTrigger>
@@ -196,7 +158,6 @@ function DateRangePicker({
         </TabsList>
       </Tabs>
 
-      {/* Custom date range picker — only shown when custom preset is active */}
       {preset === "custom" && (
         <Popover>
           <PopoverTrigger asChild>
@@ -204,10 +165,7 @@ function DateRangePicker({
               <CalendarIcon className="size-4" />
               {customRange.from ? (
                 customRange.to ? (
-                  <>
-                    {format(customRange.from, "MMM d")} –{" "}
-                    {format(customRange.to, "MMM d, yyyy")}
-                  </>
+                  <>{format(customRange.from, "MMM d")} – {format(customRange.to, "MMM d, yyyy")}</>
                 ) : (
                   format(customRange.from, "MMM d, yyyy")
                 )
@@ -231,150 +189,7 @@ function DateRangePicker({
 }
 
 // ---------------------------------------------------------------------------
-// Sub-component: ExpandableSessionRow
-// Renders a single session row. On expand, fetches and renders its offers.
-// ---------------------------------------------------------------------------
-
-function ExpandableSessionRow({ session }: { session: Session }) {
-  const [expanded, setExpanded] = React.useState(false);
-  const [offers, setOffers] = React.useState<Offer[]>([]);
-  const [loadingOffers, setLoadingOffers] = React.useState(false);
-
-  async function handleExpand() {
-    const next = !expanded;
-    setExpanded(next);
-
-    // Fetch offers on first expand only
-    if (next && offers.length === 0) {
-      setLoadingOffers(true);
-      try {
-        const result = await OfferService.getBySessionId(session.id);
-        setOffers(result);
-      } catch (err) {
-        console.error("Failed to load offers for session", session.id, err);
-      } finally {
-        setLoadingOffers(false);
-      }
-    }
-  }
-
-  return (
-    <>
-      {/* Session summary row */}
-      <TableRow
-        className="cursor-pointer select-none"
-        onClick={handleExpand}
-      >
-        {/* Expand toggle */}
-        <TableCell className="w-8 px-2">
-          {expanded ? (
-            <ChevronDown className="size-4 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="size-4 text-muted-foreground" />
-          )}
-        </TableCell>
-
-        {/* Date */}
-        <TableCell className="font-mono text-xs">
-          {format(parseISO(session.date), "MMM d, yyyy")}
-        </TableCell>
-
-        {/* Total Earnings */}
-        <TableCell className="font-medium tabular-nums">
-          {formatCurrency(session.total_earnings)}
-        </TableCell>
-
-        {/* Base Pay + Tips breakdown */}
-        <TableCell className="text-xs text-muted-foreground tabular-nums">
-          {session.base_pay !== null || session.tips !== null ? (
-            <span>
-              {formatCurrency(session.base_pay)} pay /{" "}
-              {formatCurrency(session.tips)} tips
-            </span>
-          ) : (
-            "—"
-          )}
-        </TableCell>
-
-        {/* Time on road */}
-        <TableCell className="tabular-nums text-sm">
-          {formatMinutes(session.active_time)}
-          {session.total_time !== null && (
-            <span className="text-muted-foreground text-xs ml-1">
-              / {formatMinutes(session.total_time)}
-            </span>
-          )}
-        </TableCell>
-
-        {/* Deliveries */}
-        <TableCell className="text-center tabular-nums">
-          {session.deliveries ?? "—"}
-        </TableCell>
-
-        {/* Offers count */}
-        <TableCell className="text-center">
-          {session.offers_count !== null ? (
-            <Badge variant="secondary">{session.offers_count}</Badge>
-          ) : (
-            "—"
-          )}
-        </TableCell>
-      </TableRow>
-
-      {/* Expanded offer rows */}
-      {expanded && (
-        <>
-          {loadingOffers ? (
-            <TableRow>
-              <TableCell colSpan={7} className="py-2 pl-10">
-                <Skeleton className="h-4 w-48" />
-              </TableCell>
-            </TableRow>
-          ) : offers.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={7}
-                className="py-2 pl-10 text-xs text-muted-foreground italic"
-              >
-                No individual offers recorded for this session.
-              </TableCell>
-            </TableRow>
-          ) : (
-            offers.map((offer) => (
-              <TableRow
-                key={offer.id}
-                className="bg-muted/30 hover:bg-muted/40"
-              >
-                {/* Indent spacer */}
-                <TableCell colSpan={2} />
-
-                {/* Store name spans earnings col */}
-                <TableCell
-                  colSpan={2}
-                  className="text-xs text-muted-foreground pl-6"
-                >
-                  📦 {offer.store ?? "Unknown store"}
-                </TableCell>
-
-                {/* Offer earnings */}
-                <TableCell className="tabular-nums text-xs font-medium">
-                  {formatCurrency(offer.total_earnings)}
-                </TableCell>
-
-                {/* Empty cells to fill row */}
-                <TableCell colSpan={2} />
-              </TableRow>
-            ))
-          )}
-        </>
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Sub-component: TableSkeleton
-// Shown while initial session data is loading.
 // ---------------------------------------------------------------------------
 
 function TableSkeleton() {
@@ -382,9 +197,11 @@ function TableSkeleton() {
     <>
       {Array.from({ length: 6 }).map((_, i) => (
         <TableRow key={i}>
-          <TableCell colSpan={7}>
-            <Skeleton className="h-4 w-full" />
-          </TableCell>
+          {Array.from({ length: 10 }).map((_, j) => (
+            <TableCell key={j}>
+              <Skeleton className="h-4 w-full" />
+            </TableCell>
+          ))}
         </TableRow>
       ))}
     </>
@@ -396,19 +213,25 @@ function TableSkeleton() {
 // ---------------------------------------------------------------------------
 
 export function Data() {
-  // -- State --
+  // -- Sessions state --
+  const [sessions, setSessions]     = React.useState<Session[]>([]);
+  const [loading, setLoading]       = React.useState(true);
+  const [error, setError]           = React.useState<string | null>(null);
+  const [exporting, setExporting]   = React.useState(false);
 
-  const [sessions, setSessions] = React.useState<Session[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [exporting, setExporting] = React.useState(false);
+  // -- Filter state --
+  const [searchQuery, setSearchQuery]           = React.useState("");
+  const [datePreset, setDatePreset]             = React.useState<DateRangePreset>("month");
+  const [customDateRange, setCustomDateRange]   = React.useState<{ from?: Date; to?: Date }>({});
 
-  const [searchQuery, setSearchQuery] = React.useState("");
-  const [datePreset, setDatePreset] = React.useState<DateRangePreset>("month");
-  const [customDateRange, setCustomDateRange] = React.useState<{
-    from?: Date;
-    to?: Date;
-  }>({});
+  // -- Detail sheet state --
+  // Offers are fetched lazily on row click and cached by session ID
+  const [selectedSession, setSelectedSession]   = React.useState<Session | null>(null);
+  const [selectedOffers, setSelectedOffers]     = React.useState<Offer[]>([]);
+  const [sheetOpen, setSheetOpen]               = React.useState(false);
+  const [loadingOffers, setLoadingOffers]       = React.useState(false);
+  // Cache offers per session to avoid redundant fetches within the same page load
+  const offersCache = React.useRef<Map<number, Offer[]>>(new Map());
 
   // -- Data fetch --
 
@@ -420,48 +243,83 @@ export function Data() {
       setSessions(data);
     } catch (err) {
       console.error("Failed to load sessions:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load sessions from the database."
-      );
+      setError(err instanceof Error ? err.message : "Failed to load sessions from the database.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  React.useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+  React.useEffect(() => { fetchSessions(); }, [fetchSessions]);
 
-  // -- Derived: filtered sessions --
+  // -- Filtered sessions --
 
   const filteredSessions = React.useMemo(() => {
     let filtered = sessions;
 
-    // Text search: match against date string (ISO) for now.
-    // Offer-level store search requires loading all offers — deferred to a
-    // future enhancement to keep the initial render fast.
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((s) => s.date.toLowerCase().includes(query));
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (s) =>
+          s.date.includes(q) ||
+          (s.start_time ?? "").toLowerCase().includes(q) ||
+          (s.end_time ?? "").toLowerCase().includes(q)
+      );
     }
 
-    // Date range filter — compare session.date (YYYY-MM-DD) against the range
-    const range =
-      datePreset === "custom" ? customDateRange : getPresetDateRange(datePreset);
-
+    const range = datePreset === "custom" ? customDateRange : getPresetDateRange(datePreset);
     if (range?.from) {
       const fromMs = range.from.getTime();
-      const toMs = range.to?.getTime() ?? Date.now();
+      const toMs   = range.to?.getTime() ?? Date.now();
       filtered = filtered.filter((s) => {
-        const sessionMs = parseISO(s.date).getTime();
-        return sessionMs >= fromMs && sessionMs <= toMs;
+        const t = parseISO(s.date).getTime();
+        return t >= fromMs && t <= toMs;
       });
     }
 
     return filtered;
   }, [sessions, searchQuery, datePreset, customDateRange]);
 
-  // -- Handlers --
+  // -- Row click → open sheet --
+
+  async function handleRowClick(session: Session) {
+    setSelectedSession(session);
+    setSheetOpen(true);
+
+    // Serve from cache if available
+    if (offersCache.current.has(session.id)) {
+      setSelectedOffers(offersCache.current.get(session.id)!);
+      return;
+    }
+
+    setLoadingOffers(true);
+    setSelectedOffers([]);
+    try {
+      const offers = await OfferService.getBySessionId(session.id);
+      offersCache.current.set(session.id, offers);
+      setSelectedOffers(offers);
+    } catch (err) {
+      console.error("Failed to load offers for session", session.id, err);
+    } finally {
+      setLoadingOffers(false);
+    }
+  }
+
+  // -- Sheet callbacks --
+
+  function handleSessionUpdate(updated: Session) {
+    // Patch the in-memory list so the table reflects the edit instantly
+    setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    setSelectedSession(updated);
+    // Invalidate the offers cache for this session so re-open fetches fresh data
+    offersCache.current.delete(updated.id);
+  }
+
+  function handleSessionDelete(sessionId: number) {
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    offersCache.current.delete(sessionId);
+  }
+
+  // -- Export --
 
   async function handleExport() {
     setExporting(true);
@@ -480,13 +338,13 @@ export function Data() {
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-6 pt-4">
+
       {/* Page header */}
       <Card>
         <CardHeader>
           <CardTitle>Data</CardTitle>
           <CardDescription>
-            View all recorded sessions and their individual offers. Filter by date or
-            search, then expand any row to see per-offer breakdown.
+            All recorded sessions. Click any row to view full details or edit.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -498,14 +356,8 @@ export function Data() {
           <AlertTitle>Failed to load data</AlertTitle>
           <AlertDescription className="flex items-center justify-between">
             {error}
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-4 gap-2"
-              onClick={fetchSessions}
-            >
-              <RefreshCw className="size-3" />
-              Retry
+            <Button variant="outline" size="sm" className="ml-4 gap-2" onClick={fetchSessions}>
+              <RefreshCw className="size-3" /> Retry
             </Button>
           </AlertDescription>
         </Alert>
@@ -515,18 +367,16 @@ export function Data() {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            {/* Search input */}
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
-                placeholder="Search by date (e.g. 2025-01)..."
+                placeholder="Search by date or time…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
               />
             </div>
 
-            {/* Date range picker */}
             <DateRangePicker
               preset={datePreset}
               customRange={customDateRange}
@@ -534,18 +384,13 @@ export function Data() {
               onCustomRangeChange={setCustomDateRange}
             />
 
-            {/* Export button */}
             <Button
               variant="outline"
               onClick={handleExport}
               disabled={exporting || filteredSessions.length === 0}
               className="gap-2"
             >
-              {exporting ? (
-                <RefreshCw className="size-4 animate-spin" />
-              ) : (
-                <Download className="size-4" />
-              )}
+              {exporting ? <RefreshCw className="size-4 animate-spin" /> : <Download className="size-4" />}
               Export CSV
             </Button>
           </div>
@@ -553,7 +398,7 @@ export function Data() {
       </Card>
 
       {/* Results summary */}
-      <div className="flex items-center justify-between px-1">
+      <div className="px-1">
         <p className="text-sm text-muted-foreground">
           {loading
             ? "Loading sessions…"
@@ -567,14 +412,16 @@ export function Data() {
           <Table>
             <TableHeader>
               <TableRow>
-                {/* Expand toggle spacer */}
-                <TableHead className="w-8" />
                 <TableHead className="w-[130px]">Date</TableHead>
-                <TableHead className="w-[120px]">Total</TableHead>
-                <TableHead>Pay / Tips</TableHead>
-                <TableHead className="w-[140px]">Active / Total</TableHead>
+                <TableHead className="w-[105px]">Start</TableHead>
+                <TableHead className="w-[105px]">End</TableHead>
+                <TableHead className="w-[110px]">Total</TableHead>
+                <TableHead className="w-[110px]">Base Pay</TableHead>
+                <TableHead className="w-[100px]">Tips</TableHead>
+                <TableHead className="w-[110px]">Active</TableHead>
+                <TableHead className="w-[110px]">Total Time</TableHead>
                 <TableHead className="w-[100px] text-center">Deliveries</TableHead>
-                <TableHead className="w-[90px] text-center">Offers</TableHead>
+                <TableHead className="w-[80px] text-center">Offers</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -582,22 +429,69 @@ export function Data() {
                 <TableSkeleton />
               ) : filteredSessions.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="h-24 text-center text-muted-foreground"
-                  >
+                  <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
                     No sessions found. Try adjusting your filters.
                   </TableCell>
                 </TableRow>
               ) : (
                 filteredSessions.map((session) => (
-                  <ExpandableSessionRow key={session.id} session={session} />
+                  <TableRow
+                    key={session.id}
+                    className="cursor-pointer"
+                    onClick={() => handleRowClick(session)}
+                  >
+                    <TableCell className="font-mono text-xs">
+                      {format(parseISO(session.date), "MMM d, yyyy")}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {session.start_time ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {session.end_time ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-medium tabular-nums">
+                      {fmt$(session.total_earnings)}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground text-sm">
+                      {fmt$(session.base_pay)}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-muted-foreground text-sm">
+                      {fmt$(session.tips)}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-sm">
+                      {fmtMinutes(session.active_time)}
+                    </TableCell>
+                    <TableCell className="tabular-nums text-sm">
+                      {fmtMinutes(session.total_time)}
+                    </TableCell>
+                    <TableCell className="text-center tabular-nums">
+                      {session.deliveries ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {session.offers_count !== null ? (
+                        <Badge variant="secondary">{session.offers_count}</Badge>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
         </ScrollArea>
       </Card>
+
+      {/* Session detail / edit sheet */}
+      <SessionDetailSheet
+        session={selectedSession}
+        offers={loadingOffers ? [] : selectedOffers}
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        onUpdate={handleSessionUpdate}
+        onDelete={handleSessionDelete}
+      />
+
     </div>
   );
 }
